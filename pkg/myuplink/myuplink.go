@@ -17,9 +17,10 @@ type TokenResponse struct {
 
 func GetAccessToken(clientID, clientSecret, redirectURI, authCode string) (*TokenResponse, error) {
 	data := url.Values{}
-	data.Set("grant_type", "authorization_code")
-	data.Set("code", authCode)
-	data.Set("redirect_uri", redirectURI)
+	data.Set("grant_type", "client_credentials")
+	data.Set("scope", "READSYSTEM WRITESYSTEM")
+	// data.Set("code", authCode)
+	// data.Set("redirect_uri", redirectURI)
 
 	req, err := http.NewRequest("POST", "https://api.myuplink.com/oauth/token", bytes.NewBufferString(data.Encode()))
 	if err != nil {
@@ -51,5 +52,28 @@ func GetAccessToken(clientID, clientSecret, redirectURI, authCode string) (*Toke
 func SetExtraWarmWater(deviceID, accessToken string) error {
 	// This is a placeholder for the actual API call to set the extra warm water
 	fmt.Printf("Setting extra warm water for device %s with access token %s\n", deviceID, accessToken)
+
+	body := []byte(`{"25001": "0"}`)
+
+	req, err := http.NewRequest(
+		"PATCH",
+		"https://api.myuplink.com/v2/devices/hp24-r-20251115-04-d1-6e-d9-7b-f8/points",
+		bytes.NewBuffer(body),
+	)
+	if err != nil {
+		return err
+	}
+
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", accessToken))
+	req.Header.Set("Content-Type", "application/json")
+
+	// Request ausführen
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
 	return nil
 }
