@@ -1,0 +1,19 @@
+{
+  "pv": {
+    "power_url": "http://192.168.20.241:8084/rest/channel/_sum/ProductionActivePower",
+    "soc_url": "http://192.168.20.241:8084/rest/channel/_sum/EssSoc",
+    "consumption_url": "http://192.168.20.241:8084/rest/channel/_sum/ConsumptionActivePower",
+    "username": "x",
+    "password": "user"
+  },
+  "myuplink": {
+    "client_id": "f57fc7d1-b657-40e0-81cd-652ab62eecf9",
+    "client_secret": "D7B902920D4FD02607B1E5DE51E20FD9",
+    "redirect_uri": "http://localhost:8080/callback",
+    "device_id": "raspi.jung"
+  },
+  "thresholds": {
+    "power": 2000,
+    "soc": 95
+  }
+}
