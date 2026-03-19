@@ -53,7 +53,7 @@ func SetExtraWarmWater(deviceID, accessToken string) error {
 	// This is a placeholder for the actual API call to set the extra warm water
 	fmt.Printf("Setting extra warm water for device %s with access token %s\n", deviceID, accessToken)
 
-	body := []byte(`{"25001": "0"}`)
+	body := []byte(`{"25001": "1"}`)
 
 	req, err := http.NewRequest(
 		"PATCH",

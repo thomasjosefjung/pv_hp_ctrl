@@ -1,12 +1,13 @@
 # Stage 1: Build the application
-FROM golang:1.21-alpine AS builder
+FROM golang:1.26-alpine AS builder
 
 WORKDIR /app
 
-# Copy go mod and sum files
-COPY go.mod go.sum ./
+# Copy go.mod (always) and go.sum (if present)
+COPY go.mod .
+# COPY go.sum . 
 # Download all dependencies. Dependencies will be cached if the go.mod and go.sum files are not changed
-RUN go mod download
+# RUN go mod download
 
 # Copy the source code into the container
 COPY . .
@@ -28,6 +29,7 @@ COPY --from=builder /app/main .
 COPY config.json .
 
 # Expose port 8080 to the outside world
+ENTRYPOINT ["/app/main"]
 EXPOSE 8081
 
 # Command to run the executable

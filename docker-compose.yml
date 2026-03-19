@@ -1,0 +1,8 @@
+version: '3.8'
+
+services:
+  pv_hp_ctrl:
+    image: pv_hp_ctrl
+    restart: unless-stopped
+    ports:
+      - "8081:8081"

@@ -37,8 +37,11 @@ func checkAndControl() {
 		return
 	}
 
-	// if (pvData.Power-pvData.Consumption) > cfg.Thresholds.Power && pvData.Soc > cfg.Thresholds.Soc {
-	if true {
+	if (pvData.Power-pvData.Consumption) > cfg.Thresholds.Power &&
+		pvData.Soc > cfg.Thresholds.Soc &&
+		!state.GetStatus().IsActive &&
+		time.Now().Hour() < 13 {
+		// if true {
 		authCode := "your-manual-auth-code" // IMPORTANT: Replace this
 
 		token, err := myuplink.GetAccessToken(cfg.MyUplink.ClientID, cfg.MyUplink.ClientSecret, cfg.MyUplink.RedirectURI, authCode)
