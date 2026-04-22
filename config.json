@@ -10,10 +10,21 @@
     "client_id": "f57fc7d1-b657-40e0-81cd-652ab62eecf9",
     "client_secret": "D7B902920D4FD02607B1E5DE51E20FD9",
     "redirect_uri": "http://localhost:8080/callback",
-    "device_id": "raspi.jung"
+    "device_id": "hp24-r-20251115-04-d1-6e-d9-7b-f8"
   },
-  "thresholds": {
-    "power": 2000,
-    "soc": 99
+  "thresholds_hot_water": {
+    "power": 5000,
+    "soc": 80,
+    "switch_on_hysteresis_minutes": 5,
+    "switch_off_hysteresis_minutes": 10,
+    "activation_cutoff": 15
+  },
+  "thresholds_heating": {
+    "power": 3500,
+    "soc": 80,
+    "switch_on_hysteresis_minutes": 5,
+    "switch_off_hysteresis_minutes": 10,
+    "normal_offset": -1,
+    "pv_offset": 1
   }
 }

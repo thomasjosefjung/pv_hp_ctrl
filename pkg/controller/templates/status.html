@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>PV Control Status</title>
+    <style>
+        body { font-family: sans-serif; max-width: 1120px; margin: 2rem auto; padding: 0 1rem; }
+        .panel-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1.5rem; align-items: start; }
+        .panel { border: 1px solid #ddd; border-radius: 12px; background: #fff; padding: 1.25rem; box-shadow: 0 8px 24px rgba(0,0,0,0.04); }
+        .panel h2 { margin-top: 0; }
+        .status { padding: 1em; border-radius: 5px; color: white; }
+        .active { background-color: #4CAF50; }
+        .inactive { background-color: #f44336; }
+        .meta { color: #555; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-top: 1.5rem; }
+        .card { border: 1px solid #ddd; border-radius: 8px; padding: 1rem; background: #fafafa; }
+        .label { color: #666; font-size: 0.95rem; margin-bottom: 0.35rem; }
+        .value { font-size: 1.5rem; font-weight: 700; }
+    </style>
+</head>
+<body>
+    <h1>PV Control Status</h1>
+    <p class="meta">Live-Status: <span id="stream-status">Verbinde...</span></p>
+    <div class="panel-grid">
+        <section class="panel">
+            <h2>Energie</h2>
+            <div class="grid">
+                <div class="card">
+                    <div class="label">PV Leistung aktuell</div>
+                    <div class="value" id="energy-pv-power">{{if .Energy.PVData}}{{printf "%.2f" .Energy.PVData.Power}} W{{else}}--{{end}}</div>
+                </div>
+                <div class="card">
+                    <div class="label">Ladestand Akku</div>
+                    <div class="value" id="energy-pv-soc">{{if .Energy.PVData}}{{printf "%.2f" .Energy.PVData.Soc}} %{{else}}--{{end}}</div>
+                </div>
+            </div>
+        </section>
+
+        <section class="panel">
+            <h2>Hot Water</h2>
+            <p class="meta">Letzter Check: <span id="hot-water-last-check">{{if .HotWater.LastCheck.IsZero}}--{{else}}{{.HotWater.LastCheck.Format "2006-01-02 15:04:05"}}{{end}}</span></p>
+            <div id="hot-water-status-box" class="status {{if .HotWater.IsActive}}active{{else}}inactive{{end}}">
+                <p id="hot-water-status-message">{{.HotWater.Message}}</p>
+            </div>
+            <div class="grid">
+                <div class="card">
+                    <div class="label">Extra Hot Water aktiv</div>
+                    <div class="value" id="extra-hot-water-active">{{if .HotWater.ExtraHotWaterActive}}Ja{{else}}Nein{{end}}</div>
+                </div>
+                <div class="card">
+                    <div class="label">Hot-Water-Temperatur</div>
+                    <div class="value" id="hot-water-temperature">{{formatTemperature .HotWater.DomesticHotWaterTempCelsius}}</div>
+                </div>
+                <div class="card">
+                    <div class="label">Restzeit bis Einschalten</div>
+                    <div class="value" id="hot-water-switch-on-hysteresis">{{formatHysteresis .HotWater.SwitchOnHysteresis.Active .HotWater.SwitchOnHysteresis.RemainingSeconds .HotWater.SwitchOnHysteresisMinutes}}</div>
+                </div>
+                <div class="card">
+                    <div class="label">Restzeit bis Ausschalten</div>
+                    <div class="value" id="hot-water-switch-off-hysteresis">{{formatHysteresis .HotWater.SwitchOffHysteresis.Active .HotWater.SwitchOffHysteresis.RemainingSeconds .HotWater.SwitchOffHysteresisMinutes}}</div>
+                </div>
+            </div>
+        </section>
+
+        <section class="panel">
+            <h2>Heizungs-Overwrite</h2>
+            <p class="meta">Letzter Check: <span id="heating-last-check">{{if .Heating.LastCheck.IsZero}}--{{else}}{{.Heating.LastCheck.Format "2006-01-02 15:04:05"}}{{end}}</span></p>
+            <div id="heating-status-box" class="status {{if .Heating.IsActive}}active{{else}}inactive{{end}}">
+                <p id="heating-status-message">{{.Heating.Message}}</p>
+            </div>
+            <div class="grid">
+                <div class="card">
+                    <div class="label">Offset aktuell</div>
+                    <div class="value" id="heating-offset">{{formatTemperatureOffset .Heating.TemperatureOffset}}</div>
+                </div>
+                <div class="card">
+                    <div class="label">Normal / PV</div>
+                    <div class="value" id="heating-targets">{{formatTemperatureOffset .Heating.NormalOffset}} / {{formatTemperatureOffset .Heating.PVOffset}}</div>
+                </div>
+                <div class="card">
+                    <div class="label">Restzeit bis Einschalten</div>
+                    <div class="value" id="heating-switch-on-hysteresis">{{formatHysteresis .Heating.SwitchOnHysteresis.Active .Heating.SwitchOnHysteresis.RemainingSeconds .Heating.SwitchOnHysteresisMinutes}}</div>
+                </div>
+                <div class="card">
+                    <div class="label">Restzeit bis Ausschalten</div>
+                    <div class="value" id="heating-switch-off-hysteresis">{{formatHysteresis .Heating.SwitchOffHysteresis.Active .Heating.SwitchOffHysteresis.RemainingSeconds .Heating.SwitchOffHysteresisMinutes}}</div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <script>
+        (function () {
+            var streamStatus = document.getElementById("stream-status");
+            var energyPower = document.getElementById("energy-pv-power");
+            var energySoc = document.getElementById("energy-pv-soc");
+            var hotWaterLastCheck = document.getElementById("hot-water-last-check");
+            var hotWaterStatusBox = document.getElementById("hot-water-status-box");
+            var hotWaterStatusMessage = document.getElementById("hot-water-status-message");
+            var extraHotWaterActive = document.getElementById("extra-hot-water-active");
+            var hotWaterTemperature = document.getElementById("hot-water-temperature");
+            var hotWaterSwitchOnHysteresis = document.getElementById("hot-water-switch-on-hysteresis");
+            var hotWaterSwitchOffHysteresis = document.getElementById("hot-water-switch-off-hysteresis");
+            var heatingLastCheck = document.getElementById("heating-last-check");
+            var heatingStatusBox = document.getElementById("heating-status-box");
+            var heatingStatusMessage = document.getElementById("heating-status-message");
+            var heatingOffset = document.getElementById("heating-offset");
+            var heatingTargets = document.getElementById("heating-targets");
+            var heatingSwitchOnHysteresis = document.getElementById("heating-switch-on-hysteresis");
+            var heatingSwitchOffHysteresis = document.getElementById("heating-switch-off-hysteresis");
+
+            function formatValue(value, unit) {
+                if (typeof value !== "number") {
+                    return "--";
+                }
+
+                return value.toFixed(2) + " " + unit;
+            }
+
+            function formatTimestamp(value) {
+                if (!value) {
+                    return "--";
+                }
+
+                var date = new Date(value);
+                if (Number.isNaN(date.getTime())) {
+                    return value;
+                }
+
+                return date.toLocaleString("de-DE");
+            }
+
+            function formatRemainingSeconds(seconds) {
+                if (typeof seconds !== "number" || seconds < 0) {
+                    return "--";
+                }
+
+                var hours = Math.floor(seconds / 3600);
+                var minutes = Math.floor((seconds % 3600) / 60);
+                var secs = seconds % 60;
+
+                if (hours > 0) {
+                    return hours + ":" + String(minutes).padStart(2, "0") + ":" + String(secs).padStart(2, "0");
+                }
+
+                return minutes + ":" + String(secs).padStart(2, "0");
+            }
+
+            function formatHysteresis(status, key, totalMinutes) {
+                if (typeof totalMinutes !== "number") {
+                    return "--";
+                }
+
+                var hysteresis = status[key];
+                if (!hysteresis || !hysteresis.active) {
+                    return "-- / " + totalMinutes + " min";
+                }
+
+                return formatRemainingSeconds(hysteresis.remainingSeconds) + " / " + totalMinutes + " min";
+            }
+
+            function formatTemperatureOffset(value) {
+                if (typeof value !== "number") {
+                    return "--";
+                }
+
+                return (value >= 0 ? "+" : "") + value.toFixed(1) + " C";
+            }
+
+            function formatTemperature(value) {
+                if (typeof value !== "number") {
+                    return "--";
+                }
+
+                return value.toFixed(1) + " C";
+            }
+
+            function render(status) {
+                var energy = status.energy || {};
+                var hotWater = status.hotWater || {};
+                var heating = status.heating || {};
+
+                energyPower.textContent = energy.pvData ? formatValue(energy.pvData.power, "W") : "--";
+                energySoc.textContent = energy.pvData ? formatValue(energy.pvData.soc, "%") : "--";
+                hotWaterLastCheck.textContent = formatTimestamp(hotWater.lastCheck);
+                hotWaterStatusMessage.textContent = hotWater.message || "";
+                hotWaterStatusBox.classList.toggle("active", Boolean(hotWater.isActive));
+                hotWaterStatusBox.classList.toggle("inactive", !hotWater.isActive);
+                extraHotWaterActive.textContent = hotWater.extraHotWaterActive ? "Ja" : "Nein";
+                hotWaterTemperature.textContent = formatTemperature(hotWater.domesticHotWaterTempCelsius);
+                hotWaterSwitchOnHysteresis.textContent = formatHysteresis(hotWater, "switchOnHysteresis", hotWater.switchOnHysteresisMinutes);
+                hotWaterSwitchOffHysteresis.textContent = formatHysteresis(hotWater, "switchOffHysteresis", hotWater.switchOffHysteresisMinutes);
+
+                heatingLastCheck.textContent = formatTimestamp(heating.lastCheck);
+                heatingStatusMessage.textContent = heating.message || "";
+                heatingStatusBox.classList.toggle("active", Boolean(heating.isActive));
+                heatingStatusBox.classList.toggle("inactive", !heating.isActive);
+                heatingOffset.textContent = formatTemperatureOffset(heating.temperatureOffset);
+                heatingTargets.textContent = formatTemperatureOffset(heating.normalOffset) + " / " + formatTemperatureOffset(heating.pvOffset);
+                heatingSwitchOnHysteresis.textContent = formatHysteresis(heating, "switchOnHysteresis", heating.switchOnHysteresisMinutes);
+                heatingSwitchOffHysteresis.textContent = formatHysteresis(heating, "switchOffHysteresis", heating.switchOffHysteresisMinutes);
+            }
+
+            var streamUrl = new URL("api/status/stream", window.location.href);
+            var source = new EventSource(streamUrl);
+            source.onopen = function () {
+                streamStatus.textContent = "Verbunden";
+            };
+            source.onmessage = function (event) {
+                streamStatus.textContent = "Verbunden";
+                render(JSON.parse(event.data));
+            };
+            source.onerror = function () {
+                streamStatus.textContent = "Verbindung wird neu aufgebaut...";
+            };
+        })();
+    </script>
+</body>
+</html>

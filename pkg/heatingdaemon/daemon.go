@@ -1,0 +1,145 @@
+package heatingdaemon
+
+import (
+	"fmt"
+	"log"
+	"math"
+	"pv_hp_ctrl/config"
+	"pv_hp_ctrl/pkg/daemoncore"
+	"pv_hp_ctrl/pkg/state"
+	"time"
+)
+
+var (
+	clientProvider = &daemoncore.ClientProvider{}
+	// timingState keeps the hysteresis windows stable across polling cycles.
+	//
+	// The heating daemon has different domain rules than the hot-water daemon,
+	// but it composes the same shared timing helper instead of inheriting fields.
+	timingState = daemoncore.TimingState{}
+)
+
+func RunTask() {
+	deps, err := daemoncore.LoadDependencies(config.DefaultPath, clientProvider)
+	if err != nil {
+		log.Printf("Failed to load daemon dependencies: %v", err)
+		state.SetHeatingStatus(fmt.Sprintf("Error: %v", err), false, 0, state.HysteresisStatus{}, state.HysteresisStatus{})
+		return
+	}
+
+	cfg := deps.Config
+	client := deps.Client
+	pvData := state.GetStatus().Energy.PVData
+	if pvData == nil {
+		state.SetHeatingStatus("Shared energy status unavailable", false, 0, state.HysteresisStatus{}, state.HysteresisStatus{})
+		return
+	}
+
+	currentOffset, err := client.GetHeatingTemperatureOffset(cfg.MyUplink.DeviceID)
+	if err != nil {
+		log.Printf("Failed to get heating temperature offset: %v", err)
+		state.SetHeatingStatus(fmt.Sprintf("Error: %v", err), false, 0, state.HysteresisStatus{}, state.HysteresisStatus{})
+		return
+	}
+
+	localNow := time.Now().In(time.Local)
+	switchOnHysteresis := cfg.HeatingSwitchOnHysteresisDuration()
+	switchOffHysteresis := cfg.HeatingSwitchOffHysteresisDuration()
+	powerThreshold := cfg.HeatingPowerThreshold()
+	socThreshold := cfg.HeatingSocThreshold()
+	normalOffset := cfg.HeatingNormalOffset()
+	pvOffset := cfg.HeatingPVOffset()
+	offsetActive := offsetsEqual(currentOffset, pvOffset)
+
+	// The shared runner handles the repetitive technical plumbing.
+	// This file only contains the business decision for parameter 5001.
+	if offsetActive {
+		timingState.ConditionsMetSince = time.Time{}
+
+		if heatingConditionsMet(pvData.Power, pvData.Soc, powerThreshold, socThreshold) {
+			timingState.ConditionsNotMetSince = time.Time{}
+			state.SetHeatingStatus("Heating offset active; conditions still met", true, currentOffset, state.HysteresisStatus{}, state.HysteresisStatus{})
+			log.Printf("Heating offset remains active with PV power %.2f W and offset %.1f C", pvData.Power, currentOffset)
+		} else {
+			if timingState.ConditionsNotMetSince.IsZero() {
+				timingState.ConditionsNotMetSince = localNow
+				state.SetHeatingStatus(
+					fmt.Sprintf("Heating offset active; switch-off hysteresis started (%s)", switchOffHysteresis),
+					true,
+					currentOffset,
+					state.HysteresisStatus{},
+					daemoncore.HysteresisStatus(switchOffHysteresis, timingState.ConditionsNotMetSince, localNow),
+				)
+				log.Printf("Heating offset no longer meets conditions, starting switch-off hysteresis at %s", localNow.Format("2006-01-02 15:04:05 MST"))
+			} else if localNow.Sub(timingState.ConditionsNotMetSince) < switchOffHysteresis {
+				remaining := switchOffHysteresis - localNow.Sub(timingState.ConditionsNotMetSince)
+				state.SetHeatingStatus(
+					fmt.Sprintf("Heating offset active; waiting %s before switch-off", remaining.Round(time.Second)),
+					true,
+					currentOffset,
+					state.HysteresisStatus{},
+					daemoncore.HysteresisStatus(switchOffHysteresis, timingState.ConditionsNotMetSince, localNow),
+				)
+				log.Printf("Heating offset still active during switch-off hysteresis, %s remaining", remaining.Round(time.Second))
+			} else {
+				err = client.SetHeatingTemperatureOffset(cfg.MyUplink.DeviceID, normalOffset)
+				if err != nil {
+					log.Printf("Failed to reset heating temperature offset: %v", err)
+					state.SetHeatingStatus(fmt.Sprintf("Error: %v", err), true, currentOffset, state.HysteresisStatus{}, state.HysteresisStatus{})
+					return
+				}
+
+				timingState.ConditionsNotMetSince = time.Time{}
+				state.SetHeatingStatus("Heating offset deactivated; conditions no longer met", false, normalOffset, state.HysteresisStatus{}, state.HysteresisStatus{})
+				log.Printf("Heating offset deactivated at %s with PV power %.2f W", localNow.Format("2006-01-02 15:04:05 MST"), pvData.Power)
+			}
+		}
+	} else {
+		timingState.ConditionsNotMetSince = time.Time{}
+
+		if !heatingConditionsMet(pvData.Power, pvData.Soc, powerThreshold, socThreshold) {
+			timingState.ConditionsMetSince = time.Time{}
+			state.SetHeatingStatus("Conditions not met for heating offset", false, currentOffset, state.HysteresisStatus{}, state.HysteresisStatus{})
+			log.Println("Conditions not met for heating offset")
+		} else if timingState.ConditionsMetSince.IsZero() {
+			timingState.ConditionsMetSince = localNow
+			state.SetHeatingStatus(
+				fmt.Sprintf("Conditions met; switch-on hysteresis started (%s)", switchOnHysteresis),
+				false,
+				currentOffset,
+				daemoncore.HysteresisStatus(switchOnHysteresis, timingState.ConditionsMetSince, localNow),
+				state.HysteresisStatus{},
+			)
+			log.Printf("Conditions met for heating offset, starting switch-on hysteresis at %s", localNow.Format("2006-01-02 15:04:05 MST"))
+		} else if localNow.Sub(timingState.ConditionsMetSince) < switchOnHysteresis {
+			remaining := switchOnHysteresis - localNow.Sub(timingState.ConditionsMetSince)
+			state.SetHeatingStatus(
+				fmt.Sprintf("Conditions met; waiting %s before heating offset activation", remaining.Round(time.Second)),
+				false,
+				currentOffset,
+				daemoncore.HysteresisStatus(switchOnHysteresis, timingState.ConditionsMetSince, localNow),
+				state.HysteresisStatus{},
+			)
+			log.Printf("Heating switch-on hysteresis still active, %s remaining", remaining.Round(time.Second))
+		} else {
+			err = client.SetHeatingTemperatureOffset(cfg.MyUplink.DeviceID, pvOffset)
+			if err != nil {
+				log.Printf("Failed to set heating temperature offset: %v", err)
+				state.SetHeatingStatus(fmt.Sprintf("Error: %v", err), false, currentOffset, state.HysteresisStatus{}, state.HysteresisStatus{})
+				return
+			}
+
+			timingState.ConditionsMetSince = time.Time{}
+			state.SetHeatingStatus("Heating offset activated", true, pvOffset, state.HysteresisStatus{}, state.HysteresisStatus{})
+			log.Printf("Heating offset activated at %s with PV power %.2f W", localNow.Format("2006-01-02 15:04:05 MST"), pvData.Power)
+		}
+	}
+}
+
+func heatingConditionsMet(pvPower, soc, powerThreshold, socThreshold float64) bool {
+	return pvPower > powerThreshold && soc > socThreshold
+}
+
+func offsetsEqual(left, right float64) bool {
+	return math.Abs(left-right) < 0.0001
+}
