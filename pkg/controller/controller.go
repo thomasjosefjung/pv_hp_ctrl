@@ -6,9 +6,14 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"path/filepath"
 	"pv_hp_ctrl/config"
+	"pv_hp_ctrl/pkg/heatingdaemon"
+	"pv_hp_ctrl/pkg/hotwaterdaemon"
 	"pv_hp_ctrl/pkg/pv"
 	"pv_hp_ctrl/pkg/state"
+	"strconv"
+	"sync"
 	"time"
 )
 
@@ -21,9 +26,31 @@ var statusTemplate = template.Must(template.New("status.html").Funcs(template.Fu
 	"formatTemperatureOffset": formatTemperatureOffset,
 }).ParseFS(templateFS, "templates/status.html"))
 
+var (
+	configPath               = config.DefaultPath
+	daemonSettingsMu         sync.Mutex
+	applyHotWaterDaemonState = func(enabled bool) error {
+		if enabled {
+			hotwaterdaemon.RunTask()
+			return nil
+		}
+
+		return hotwaterdaemon.Disable()
+	}
+	applyHeatingDaemonState = func(enabled bool) error {
+		if enabled {
+			heatingdaemon.RunTask()
+			return nil
+		}
+
+		return heatingdaemon.Disable()
+	}
+)
+
 type daemonStatusResponse struct {
 	LastCheck                  time.Time              `json:"lastCheck"`
 	Message                    string                 `json:"message"`
+	Enabled                    bool                   `json:"enabled"`
 	IsActive                   bool                   `json:"isActive"`
 	SwitchOnHysteresis         state.HysteresisStatus `json:"switchOnHysteresis"`
 	SwitchOffHysteresis        state.HysteresisStatus `json:"switchOffHysteresis"`
@@ -48,10 +75,34 @@ type heatingStatusResponse struct {
 	PVOffset          float64 `json:"pvOffset"`
 }
 
+type hotWaterThresholdsResponse struct {
+	Power                      float64 `json:"power"`
+	Soc                        float64 `json:"soc"`
+	SwitchOnHysteresisMinutes  int     `json:"switchOnHysteresisMinutes"`
+	SwitchOffHysteresisMinutes int     `json:"switchOffHysteresisMinutes"`
+	ActivationCutoff           int     `json:"activationCutoff"`
+}
+
+type heatingThresholdsResponse struct {
+	Power                      float64 `json:"power"`
+	Soc                        float64 `json:"soc"`
+	SwitchOnHysteresisMinutes  int     `json:"switchOnHysteresisMinutes"`
+	SwitchOffHysteresisMinutes int     `json:"switchOffHysteresisMinutes"`
+	NormalOffset               float64 `json:"normalOffset"`
+	PVOffset                   float64 `json:"pvOffset"`
+}
+
+type configStatusResponse struct {
+	Path     string                     `json:"path"`
+	HotWater hotWaterThresholdsResponse `json:"hotWater"`
+	Heating  heatingThresholdsResponse  `json:"heating"`
+}
+
 type statusResponse struct {
 	Energy   energyStatusResponse   `json:"energy"`
 	HotWater hotWaterStatusResponse `json:"hotWater"`
 	Heating  heatingStatusResponse  `json:"heating"`
+	Config   configStatusResponse   `json:"config"`
 }
 
 func HealthCheck(w http.ResponseWriter, r *http.Request) {
@@ -66,6 +117,170 @@ func StatusPage(w http.ResponseWriter, r *http.Request) {
 }
 
 func StatusAPI(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(buildStatusResponse(state.GetStatus())); err != nil {
+		http.Error(w, "Failed to encode status", http.StatusInternalServerError)
+	}
+}
+
+func UpdateDaemons(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Invalid form data", http.StatusBadRequest)
+		return
+	}
+
+	hotWaterEnabled, err := strconv.ParseBool(r.FormValue("hotWaterEnabled"))
+	if err != nil {
+		http.Error(w, "Invalid hotWaterEnabled value", http.StatusBadRequest)
+		return
+	}
+
+	heatingEnabled, err := strconv.ParseBool(r.FormValue("heatingEnabled"))
+	if err != nil {
+		http.Error(w, "Invalid heatingEnabled value", http.StatusBadRequest)
+		return
+	}
+
+	daemonSettingsMu.Lock()
+	defer daemonSettingsMu.Unlock()
+
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to load config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	cfg.SetHotWaterDaemonEnabled(hotWaterEnabled)
+	cfg.SetHeatingDaemonEnabled(heatingEnabled)
+	if err := cfg.Save(configPath); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to save config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	if err := applyHotWaterDaemonState(hotWaterEnabled); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to update hot-water daemon: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	if err := applyHeatingDaemonState(heatingEnabled); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to update heating daemon: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(buildStatusResponse(state.GetStatus())); err != nil {
+		http.Error(w, "Failed to encode status", http.StatusInternalServerError)
+	}
+}
+
+func UpdateThresholds(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Invalid form data", http.StatusBadRequest)
+		return
+	}
+
+	hotWaterPower, err := parseFloatFormValue(r, "hotWaterPower")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	hotWaterSoc, err := parseFloatFormValue(r, "hotWaterSoc")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	hotWaterSwitchOn, err := parseIntFormValue(r, "hotWaterSwitchOnHysteresisMinutes")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	hotWaterSwitchOff, err := parseIntFormValue(r, "hotWaterSwitchOffHysteresisMinutes")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	hotWaterActivationCutoff, err := parseIntFormValue(r, "hotWaterActivationCutoff")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	heatingPower, err := parseFloatFormValue(r, "heatingPower")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	heatingSoc, err := parseFloatFormValue(r, "heatingSoc")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	heatingSwitchOn, err := parseIntFormValue(r, "heatingSwitchOnHysteresisMinutes")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	heatingSwitchOff, err := parseIntFormValue(r, "heatingSwitchOffHysteresisMinutes")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	heatingNormalOffset, err := parseFloatFormValue(r, "heatingNormalOffset")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	heatingPVOffset, err := parseFloatFormValue(r, "heatingPVOffset")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	daemonSettingsMu.Lock()
+	defer daemonSettingsMu.Unlock()
+
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to load config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	cfg.ThresholdsHotWater.Power = hotWaterPower
+	cfg.ThresholdsHotWater.Soc = hotWaterSoc
+	cfg.ThresholdsHotWater.SwitchOnHysteresisMinutes = hotWaterSwitchOn
+	cfg.ThresholdsHotWater.SwitchOffHysteresisMinutes = hotWaterSwitchOff
+	cfg.ThresholdsHotWater.ActivationCutoff = hotWaterActivationCutoff
+	cfg.ThresholdsHeating.Power = heatingPower
+	cfg.ThresholdsHeating.Soc = heatingSoc
+	cfg.ThresholdsHeating.SwitchOnHysteresisMinutes = heatingSwitchOn
+	cfg.ThresholdsHeating.SwitchOffHysteresisMinutes = heatingSwitchOff
+	cfg.ThresholdsHeating.NormalOffset = float64Ptr(heatingNormalOffset)
+	cfg.ThresholdsHeating.PVOffset = float64Ptr(heatingPVOffset)
+
+	if err := cfg.Save(configPath); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to save config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(buildStatusResponse(state.GetStatus())); err != nil {
 		http.Error(w, "Failed to encode status", http.StatusInternalServerError)
@@ -124,6 +339,7 @@ func buildStatusResponse(status state.Status) statusResponse {
 			daemonStatusResponse: daemonStatusResponse{
 				LastCheck:                  status.HotWater.LastCheck,
 				Message:                    status.HotWater.Message,
+				Enabled:                    cfg.HotWaterDaemonEnabled(),
 				IsActive:                   status.HotWater.IsActive,
 				SwitchOnHysteresis:         status.HotWater.SwitchOnHysteresis,
 				SwitchOffHysteresis:        status.HotWater.SwitchOffHysteresis,
@@ -137,6 +353,7 @@ func buildStatusResponse(status state.Status) statusResponse {
 			daemonStatusResponse: daemonStatusResponse{
 				LastCheck:                  status.Heating.LastCheck,
 				Message:                    status.Heating.Message,
+				Enabled:                    cfg.HeatingDaemonEnabled(),
 				IsActive:                   status.Heating.IsActive,
 				SwitchOnHysteresis:         status.Heating.SwitchOnHysteresis,
 				SwitchOffHysteresis:        status.Heating.SwitchOffHysteresis,
@@ -147,11 +364,29 @@ func buildStatusResponse(status state.Status) statusResponse {
 			NormalOffset:      cfg.HeatingNormalOffset(),
 			PVOffset:          cfg.HeatingPVOffset(),
 		},
+		Config: configStatusResponse{
+			Path: resolvedConfigPath(),
+			HotWater: hotWaterThresholdsResponse{
+				Power:                      cfg.HotWaterPowerThreshold(),
+				Soc:                        cfg.HotWaterSocThreshold(),
+				SwitchOnHysteresisMinutes:  int(cfg.HotWaterSwitchOnHysteresisDuration() / time.Minute),
+				SwitchOffHysteresisMinutes: int(cfg.HotWaterSwitchOffHysteresisDuration() / time.Minute),
+				ActivationCutoff:           cfg.HotWaterActivationCutoffHour(),
+			},
+			Heating: heatingThresholdsResponse{
+				Power:                      cfg.HeatingPowerThreshold(),
+				Soc:                        cfg.HeatingSocThreshold(),
+				SwitchOnHysteresisMinutes:  int(cfg.HeatingSwitchOnHysteresisDuration() / time.Minute),
+				SwitchOffHysteresisMinutes: int(cfg.HeatingSwitchOffHysteresisDuration() / time.Minute),
+				NormalOffset:               cfg.HeatingNormalOffset(),
+				PVOffset:                   cfg.HeatingPVOffset(),
+			},
+		},
 	}
 }
 
 func loadConfigWithDefaults() *config.Config {
-	cfg, err := config.Load(config.DefaultPath)
+	cfg, err := config.Load(configPath)
 	if err != nil {
 		return &config.Config{}
 	}
@@ -198,4 +433,37 @@ func formatTemperature(value *float64) string {
 	}
 
 	return fmt.Sprintf("%.1f C", *value)
+}
+
+func parseFloatFormValue(r *http.Request, key string) (float64, error) {
+	value := r.FormValue(key)
+	parsed, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid %s value", key)
+	}
+
+	return parsed, nil
+}
+
+func parseIntFormValue(r *http.Request, key string) (int, error) {
+	value := r.FormValue(key)
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, fmt.Errorf("invalid %s value", key)
+	}
+
+	return parsed, nil
+}
+
+func float64Ptr(value float64) *float64 {
+	return &value
+}
+
+func resolvedConfigPath() string {
+	absPath, err := filepath.Abs(configPath)
+	if err != nil {
+		return configPath
+	}
+
+	return absPath
 }

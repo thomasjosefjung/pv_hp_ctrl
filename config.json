@@ -1,4 +1,8 @@
 {
+  "daemons": {
+    "hot_water_enabled": true,
+    "heating_enabled": false
+  },
   "pv": {
     "power_url": "http://192.168.20.241:8084/rest/channel/_sum/ProductionActivePower",
     "soc_url": "http://192.168.20.241:8084/rest/channel/_sum/EssSoc",
@@ -21,10 +25,10 @@
   },
   "thresholds_heating": {
     "power": 3500,
-    "soc": 80,
+    "soc": 50,
     "switch_on_hysteresis_minutes": 5,
     "switch_off_hysteresis_minutes": 10,
     "normal_offset": -1,
-    "pv_offset": 1
+    "pv_offset": 1.5
   }
 }

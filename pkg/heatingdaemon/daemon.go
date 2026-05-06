@@ -29,6 +29,13 @@ func RunTask() {
 
 	cfg := deps.Config
 	client := deps.Client
+	if !cfg.HeatingDaemonEnabled() {
+		if err := disableWithClient(cfg, client, "Heating daemon disabled; normal offset restored"); err != nil {
+			log.Printf("Failed to restore normal heating offset while daemon disabled: %v", err)
+		}
+		return
+	}
+
 	pvData := state.GetStatus().Energy.PVData
 	if pvData == nil {
 		state.SetHeatingStatus("Shared energy status unavailable", false, 0, state.HysteresisStatus{}, state.HysteresisStatus{})
@@ -134,6 +141,44 @@ func RunTask() {
 			log.Printf("Heating offset activated at %s with PV power %.2f W", localNow.Format("2006-01-02 15:04:05 MST"), pvData.Power)
 		}
 	}
+}
+
+func Disable() error {
+	deps, err := daemoncore.LoadDependencies(config.DefaultPath, clientProvider)
+	if err != nil {
+		state.SetHeatingStatus(fmt.Sprintf("Error: %v", err), false, 0, state.HysteresisStatus{}, state.HysteresisStatus{})
+		return err
+	}
+
+	return disableWithClient(deps.Config, deps.Client, "Heating daemon disabled; normal offset restored")
+}
+
+func disableWithClient(cfg *config.Config, client interface {
+	GetHeatingTemperatureOffset(deviceID string) (float64, error)
+	SetHeatingTemperatureOffset(deviceID string, value float64) error
+}, message string) error {
+	timingState = daemoncore.TimingState{}
+
+	currentOffset, readErr := client.GetHeatingTemperatureOffset(cfg.MyUplink.DeviceID)
+	if readErr != nil {
+		log.Printf("Failed to get heating temperature offset while disabling daemon: %v", readErr)
+		currentOffset = cfg.HeatingNormalOffset()
+	}
+
+	normalOffset := cfg.HeatingNormalOffset()
+	if err := client.SetHeatingTemperatureOffset(cfg.MyUplink.DeviceID, normalOffset); err != nil {
+		state.SetHeatingStatus(
+			fmt.Sprintf("Heating daemon disabled, but restoring normal offset failed: %v", err),
+			false,
+			currentOffset,
+			state.HysteresisStatus{},
+			state.HysteresisStatus{},
+		)
+		return err
+	}
+
+	state.SetHeatingStatus(message, false, normalOffset, state.HysteresisStatus{}, state.HysteresisStatus{})
+	return nil
 }
 
 func heatingConditionsMet(pvPower, soc, powerThreshold, socThreshold float64) bool {

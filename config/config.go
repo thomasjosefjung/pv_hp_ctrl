@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -20,6 +21,10 @@ const (
 )
 
 type Config struct {
+	Daemons struct {
+		HotWaterEnabled *bool `json:"hot_water_enabled,omitempty"`
+		HeatingEnabled  *bool `json:"heating_enabled,omitempty"`
+	} `json:"daemons,omitempty"`
 	PV struct {
 		PowerURL       string `json:"power_url"`
 		SocURL         string `json:"soc_url"`
@@ -63,6 +68,54 @@ func Load(path string) (*Config, error) {
 	}
 
 	return &config, nil
+}
+
+func (c *Config) Save(path string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	encoder := json.NewEncoder(file)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(c); err != nil {
+		return err
+	}
+
+	if err := file.Sync(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *Config) HotWaterDaemonEnabled() bool {
+	if c == nil || c.Daemons.HotWaterEnabled == nil {
+		return true
+	}
+
+	return *c.Daemons.HotWaterEnabled
+}
+
+func (c *Config) HeatingDaemonEnabled() bool {
+	if c == nil || c.Daemons.HeatingEnabled == nil {
+		return true
+	}
+
+	return *c.Daemons.HeatingEnabled
+}
+
+func (c *Config) SetHotWaterDaemonEnabled(enabled bool) {
+	c.Daemons.HotWaterEnabled = &enabled
+}
+
+func (c *Config) SetHeatingDaemonEnabled(enabled bool) {
+	c.Daemons.HeatingEnabled = &enabled
 }
 
 func (c *Config) HotWaterSwitchOnHysteresisDuration() time.Duration {

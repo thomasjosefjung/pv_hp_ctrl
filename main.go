@@ -19,6 +19,8 @@ func main() {
 
 	http.HandleFunc("/", controller.StatusPage)
 	http.HandleFunc("/api/status", controller.StatusAPI)
+	http.HandleFunc("/api/daemons", controller.UpdateDaemons)
+	http.HandleFunc("/api/config/thresholds", controller.UpdateThresholds)
 	http.HandleFunc("/api/status/stream", controller.StatusStream)
 	http.HandleFunc("/health", controller.HealthCheck)
 	log.Fatal(http.ListenAndServe(":8081", nil))

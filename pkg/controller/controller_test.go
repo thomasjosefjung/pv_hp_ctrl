@@ -5,9 +5,13 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"pv_hp_ctrl/config"
 	"pv_hp_ctrl/pkg/pv"
 	"pv_hp_ctrl/pkg/state"
 )
@@ -71,6 +75,10 @@ func TestBuildStatusResponseUsesConfiguredValues(t *testing.T) {
 		t.Fatalf("HotWater.IsActive = %v, want %v", response.HotWater.IsActive, status.HotWater.IsActive)
 	}
 
+	if !response.HotWater.Enabled {
+		t.Fatal("expected hot-water daemon to be enabled by default")
+	}
+
 	if response.HotWater.Message != status.HotWater.Message {
 		t.Fatalf("HotWater.Message = %q, want %q", response.HotWater.Message, status.HotWater.Message)
 	}
@@ -99,6 +107,10 @@ func TestBuildStatusResponseUsesConfiguredValues(t *testing.T) {
 		t.Fatalf("Heating.SwitchOnHysteresisMinutes = %d, want 5", response.Heating.SwitchOnHysteresisMinutes)
 	}
 
+	if !response.Heating.Enabled {
+		t.Fatal("expected heating daemon to be enabled by default")
+	}
+
 	if response.Heating.SwitchOffHysteresisMinutes != 10 {
 		t.Fatalf("Heating.SwitchOffHysteresisMinutes = %d, want 10", response.Heating.SwitchOffHysteresisMinutes)
 	}
@@ -109,6 +121,18 @@ func TestBuildStatusResponseUsesConfiguredValues(t *testing.T) {
 
 	if response.Heating.PVOffset != 1.0 {
 		t.Fatalf("Heating.PVOffset = %v, want 1.0", response.Heating.PVOffset)
+	}
+
+	if response.Config.Path == "" {
+		t.Fatal("expected config path to be present")
+	}
+
+	if response.Config.HotWater.Power != 5000 {
+		t.Fatalf("Config.HotWater.Power = %v, want 5000", response.Config.HotWater.Power)
+	}
+
+	if response.Config.Heating.SwitchOffHysteresisMinutes != 10 {
+		t.Fatalf("Config.Heating.SwitchOffHysteresisMinutes = %d, want 10", response.Config.Heating.SwitchOffHysteresisMinutes)
 	}
 }
 
@@ -165,5 +189,137 @@ func TestStatusStreamSetsSSEHeadersAndEmitsInitialEvent(t *testing.T) {
 
 	if got := writer.body.String(); got == "" {
 		t.Fatal("expected an initial SSE payload")
+	}
+}
+
+func TestUpdateDaemonsPersistsCheckboxState(t *testing.T) {
+	tempDir := t.TempDir()
+	configPath = filepath.Join(tempDir, "config.json")
+	t.Cleanup(func() {
+		configPath = config.DefaultPath
+		applyHotWaterDaemonState = func(enabled bool) error {
+			return nil
+		}
+		applyHeatingDaemonState = func(enabled bool) error {
+			return nil
+		}
+	})
+
+	if err := (&config.Config{}).Save(configPath); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	var hotWaterEnabled, heatingEnabled bool
+	applyHotWaterDaemonState = func(enabled bool) error {
+		hotWaterEnabled = enabled
+		return nil
+	}
+	applyHeatingDaemonState = func(enabled bool) error {
+		heatingEnabled = enabled
+		return nil
+	}
+
+	form := url.Values{}
+	form.Set("hotWaterEnabled", "false")
+	form.Set("heatingEnabled", "true")
+	req := httptest.NewRequest(http.MethodPost, "/api/daemons", bytes.NewBufferString(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	recorder := httptest.NewRecorder()
+
+	UpdateDaemons(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		body, _ := os.ReadFile(configPath)
+		t.Fatalf("status = %d, want %d; body=%s config=%s", recorder.Code, http.StatusOK, recorder.Body.String(), string(body))
+	}
+
+	if hotWaterEnabled {
+		t.Fatal("expected hot-water daemon to be disabled")
+	}
+
+	if !heatingEnabled {
+		t.Fatal("expected heating daemon to be enabled")
+	}
+
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if cfg.HotWaterDaemonEnabled() {
+		t.Fatal("expected hot-water daemon setting to persist as disabled")
+	}
+
+	if !cfg.HeatingDaemonEnabled() {
+		t.Fatal("expected heating daemon setting to persist as enabled")
+	}
+
+	if got := recorder.Header().Get("Content-Type"); got != "application/json" {
+		t.Fatalf("Content-Type = %q, want %q", got, "application/json")
+	}
+}
+
+func TestUpdateThresholdsPersistsConfigValues(t *testing.T) {
+	tempDir := t.TempDir()
+	configPath = filepath.Join(tempDir, "config.json")
+	t.Cleanup(func() {
+		configPath = config.DefaultPath
+	})
+
+	if err := (&config.Config{}).Save(configPath); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	form := url.Values{}
+	form.Set("hotWaterPower", "6100")
+	form.Set("hotWaterSoc", "82")
+	form.Set("hotWaterSwitchOnHysteresisMinutes", "7")
+	form.Set("hotWaterSwitchOffHysteresisMinutes", "11")
+	form.Set("hotWaterActivationCutoff", "15")
+	form.Set("heatingPower", "5400")
+	form.Set("heatingSoc", "79")
+	form.Set("heatingSwitchOnHysteresisMinutes", "4")
+	form.Set("heatingSwitchOffHysteresisMinutes", "9")
+	form.Set("heatingNormalOffset", "-0.5")
+	form.Set("heatingPVOffset", "1.5")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/config/thresholds", bytes.NewBufferString(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	recorder := httptest.NewRecorder()
+
+	UpdateThresholds(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		body, _ := os.ReadFile(configPath)
+		t.Fatalf("status = %d, want %d; body=%s config=%s", recorder.Code, http.StatusOK, recorder.Body.String(), string(body))
+	}
+
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if cfg.ThresholdsHotWater.Power != 6100 {
+		t.Fatalf("ThresholdsHotWater.Power = %v, want 6100", cfg.ThresholdsHotWater.Power)
+	}
+
+	if cfg.ThresholdsHotWater.SwitchOffHysteresisMinutes != 11 {
+		t.Fatalf("ThresholdsHotWater.SwitchOffHysteresisMinutes = %d, want 11", cfg.ThresholdsHotWater.SwitchOffHysteresisMinutes)
+	}
+
+	if cfg.ThresholdsHeating.Power != 5400 {
+		t.Fatalf("ThresholdsHeating.Power = %v, want 5400", cfg.ThresholdsHeating.Power)
+	}
+
+	if cfg.ThresholdsHeating.NormalOffset == nil || *cfg.ThresholdsHeating.NormalOffset != -0.5 {
+		t.Fatalf("ThresholdsHeating.NormalOffset = %v, want -0.5", cfg.ThresholdsHeating.NormalOffset)
+	}
+
+	if cfg.ThresholdsHeating.PVOffset == nil || *cfg.ThresholdsHeating.PVOffset != 1.5 {
+		t.Fatalf("ThresholdsHeating.PVOffset = %v, want 1.5", cfg.ThresholdsHeating.PVOffset)
+	}
+
+	if got := recorder.Header().Get("Content-Type"); got != "application/json" {
+		t.Fatalf("Content-Type = %q, want %q", got, "application/json")
 	}
 }

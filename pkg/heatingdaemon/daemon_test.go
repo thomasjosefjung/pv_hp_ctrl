@@ -5,7 +5,23 @@ import (
 	"time"
 
 	"pv_hp_ctrl/config"
+	"pv_hp_ctrl/pkg/state"
 )
+
+type fakeHeatingDisableClient struct {
+	currentOffset float64
+	setCalls      []float64
+	setErr        error
+}
+
+func (c *fakeHeatingDisableClient) GetHeatingTemperatureOffset(string) (float64, error) {
+	return c.currentOffset, nil
+}
+
+func (c *fakeHeatingDisableClient) SetHeatingTemperatureOffset(_ string, value float64) error {
+	c.setCalls = append(c.setCalls, value)
+	return c.setErr
+}
 
 func TestHeatingConditionsMet(t *testing.T) {
 	t.Run("requires pv power above threshold", func(t *testing.T) {
@@ -93,4 +109,33 @@ func TestHeatingConfigDefaultsAndOverrides(t *testing.T) {
 			t.Fatalf("HeatingPVOffset() = %v, want %v", got, 1.0)
 		}
 	})
+}
+
+func TestDisableWithClientRestoresNormalOffset(t *testing.T) {
+	cfg := &config.Config{}
+	normalOffset := -2.5
+	cfg.ThresholdsHeating.NormalOffset = &normalOffset
+	cfg.MyUplink.DeviceID = "device-1"
+	client := &fakeHeatingDisableClient{currentOffset: 1.5}
+
+	if err := disableWithClient(cfg, client, "disabled"); err != nil {
+		t.Fatalf("disableWithClient() error = %v", err)
+	}
+
+	if len(client.setCalls) != 1 || client.setCalls[0] != normalOffset {
+		t.Fatalf("SetHeatingTemperatureOffset() calls = %v, want [%v]", client.setCalls, normalOffset)
+	}
+
+	status := state.GetStatus().Heating
+	if status.IsActive {
+		t.Fatal("expected heating daemon status to be inactive")
+	}
+
+	if status.TemperatureOffset != normalOffset {
+		t.Fatalf("TemperatureOffset = %v, want %v", status.TemperatureOffset, normalOffset)
+	}
+
+	if status.Message != "disabled" {
+		t.Fatalf("status message = %q, want %q", status.Message, "disabled")
+	}
 }

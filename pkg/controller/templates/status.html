@@ -4,7 +4,8 @@
     <title>PV Control Status</title>
     <style>
         body { font-family: sans-serif; max-width: 1120px; margin: 2rem auto; padding: 0 1rem; }
-        .panel-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1.5rem; align-items: start; }
+        .panel-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1.5rem; align-items: start; }
+        .config-panel-wrap { margin-top: 1.5rem; }
         .panel { border: 1px solid #ddd; border-radius: 12px; background: #fff; padding: 1.25rem; box-shadow: 0 8px 24px rgba(0,0,0,0.04); }
         .panel h2 { margin-top: 0; }
         .status { padding: 1em; border-radius: 5px; color: white; }
@@ -15,6 +16,22 @@
         .card { border: 1px solid #ddd; border-radius: 8px; padding: 1rem; background: #fafafa; }
         .label { color: #666; font-size: 0.95rem; margin-bottom: 0.35rem; }
         .value { font-size: 1.5rem; font-weight: 700; }
+        .config-path { word-break: break-all; font-family: monospace; font-size: 0.95rem; }
+        .config-form { display: grid; gap: 1rem; margin-top: 1rem; }
+        .config-section { border-top: 1px solid #eee; padding-top: 1rem; }
+        .config-section h3 { margin: 0 0 0.75rem 0; font-size: 1rem; }
+        .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.85rem 1rem; }
+        .field { display: grid; gap: 0.35rem; min-width: 0; }
+        .field label { color: #555; font-size: 0.9rem; }
+        .field input { width: 100%; min-width: 0; box-sizing: border-box; border: 1px solid #ccc; border-radius: 8px; padding: 0.6rem 0.7rem; font: inherit; }
+        .actions { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; }
+        .button { border: none; border-radius: 999px; padding: 0.75rem 1.2rem; font: inherit; background: #1b6ef3; color: #fff; cursor: pointer; }
+        .button:disabled { opacity: 0.6; cursor: not-allowed; }
+        .save-status { color: #555; min-height: 1.25rem; }
+
+        @media (max-width: 760px) {
+            .form-grid { grid-template-columns: 1fr; }
+        }
     </style>
 </head>
 <body>
@@ -37,6 +54,7 @@
 
         <section class="panel">
             <h2>Hot Water</h2>
+            <p><label><input type="checkbox" id="hot-water-enabled" {{if .HotWater.Enabled}}checked{{end}}> Hot-Water-Daemon aktiv</label></p>
             <p class="meta">Letzter Check: <span id="hot-water-last-check">{{if .HotWater.LastCheck.IsZero}}--{{else}}{{.HotWater.LastCheck.Format "2006-01-02 15:04:05"}}{{end}}</span></p>
             <div id="hot-water-status-box" class="status {{if .HotWater.IsActive}}active{{else}}inactive{{end}}">
                 <p id="hot-water-status-message">{{.HotWater.Message}}</p>
@@ -63,6 +81,7 @@
 
         <section class="panel">
             <h2>Heizungs-Overwrite</h2>
+            <p><label><input type="checkbox" id="heating-enabled" {{if .Heating.Enabled}}checked{{end}}> Heizungs-Daemon aktiv</label></p>
             <p class="meta">Letzter Check: <span id="heating-last-check">{{if .Heating.LastCheck.IsZero}}--{{else}}{{.Heating.LastCheck.Format "2006-01-02 15:04:05"}}{{end}}</span></p>
             <div id="heating-status-box" class="status {{if .Heating.IsActive}}active{{else}}inactive{{end}}">
                 <p id="heating-status-message">{{.Heating.Message}}</p>
@@ -86,6 +105,75 @@
                 </div>
             </div>
         </section>
+
+    </div>
+
+    <div class="config-panel-wrap">
+        <section class="panel">
+            <h2>Konfiguration</h2>
+            <p class="meta">Aktuelles Config-File:</p>
+            <div class="config-path" id="config-path">{{.Config.Path}}</div>
+            <form id="config-form" class="config-form">
+                <div class="config-section">
+                    <h3>Hot Water Thresholds</h3>
+                    <div class="form-grid">
+                        <div class="field">
+                            <label for="hot-water-power">Power (W)</label>
+                            <input id="hot-water-power" name="hotWaterPower" type="number" step="0.1" value="{{printf "%.2f" .Config.HotWater.Power}}">
+                        </div>
+                        <div class="field">
+                            <label for="hot-water-soc">SOC (%)</label>
+                            <input id="hot-water-soc" name="hotWaterSoc" type="number" step="0.1" value="{{printf "%.2f" .Config.HotWater.Soc}}">
+                        </div>
+                        <div class="field">
+                            <label for="hot-water-switch-on">Ein-Hysterese (min)</label>
+                            <input id="hot-water-switch-on" name="hotWaterSwitchOnHysteresisMinutes" type="number" step="1" value="{{.Config.HotWater.SwitchOnHysteresisMinutes}}">
+                        </div>
+                        <div class="field">
+                            <label for="hot-water-switch-off">Aus-Hysterese (min)</label>
+                            <input id="hot-water-switch-off" name="hotWaterSwitchOffHysteresisMinutes" type="number" step="1" value="{{.Config.HotWater.SwitchOffHysteresisMinutes}}">
+                        </div>
+                        <div class="field">
+                            <label for="hot-water-cutoff">Aktivierung bis Stunde</label>
+                            <input id="hot-water-cutoff" name="hotWaterActivationCutoff" type="number" step="1" value="{{.Config.HotWater.ActivationCutoff}}">
+                        </div>
+                    </div>
+                </div>
+                <div class="config-section">
+                    <h3>Heizung Thresholds</h3>
+                    <div class="form-grid">
+                        <div class="field">
+                            <label for="heating-power">Power (W)</label>
+                            <input id="heating-power" name="heatingPower" type="number" step="0.1" value="{{printf "%.2f" .Config.Heating.Power}}">
+                        </div>
+                        <div class="field">
+                            <label for="heating-soc">SOC (%)</label>
+                            <input id="heating-soc" name="heatingSoc" type="number" step="0.1" value="{{printf "%.2f" .Config.Heating.Soc}}">
+                        </div>
+                        <div class="field">
+                            <label for="heating-switch-on">Ein-Hysterese (min)</label>
+                            <input id="heating-switch-on" name="heatingSwitchOnHysteresisMinutes" type="number" step="1" value="{{.Config.Heating.SwitchOnHysteresisMinutes}}">
+                        </div>
+                        <div class="field">
+                            <label for="heating-switch-off">Aus-Hysterese (min)</label>
+                            <input id="heating-switch-off" name="heatingSwitchOffHysteresisMinutes" type="number" step="1" value="{{.Config.Heating.SwitchOffHysteresisMinutes}}">
+                        </div>
+                        <div class="field">
+                            <label for="heating-normal-offset">Normal-Offset (C)</label>
+                            <input id="heating-normal-offset" name="heatingNormalOffset" type="number" step="0.1" value="{{printf "%.1f" .Config.Heating.NormalOffset}}">
+                        </div>
+                        <div class="field">
+                            <label for="heating-pv-offset">PV-Offset (C)</label>
+                            <input id="heating-pv-offset" name="heatingPVOffset" type="number" step="0.1" value="{{printf "%.1f" .Config.Heating.PVOffset}}">
+                        </div>
+                    </div>
+                </div>
+                <div class="actions">
+                    <button type="submit" class="button" id="config-save">Thresholds speichern</button>
+                    <div class="save-status" id="config-save-status"></div>
+                </div>
+            </form>
+        </section>
     </div>
 
     <script>
@@ -94,6 +182,7 @@
             var energyPower = document.getElementById("energy-pv-power");
             var energySoc = document.getElementById("energy-pv-soc");
             var hotWaterLastCheck = document.getElementById("hot-water-last-check");
+            var hotWaterEnabled = document.getElementById("hot-water-enabled");
             var hotWaterStatusBox = document.getElementById("hot-water-status-box");
             var hotWaterStatusMessage = document.getElementById("hot-water-status-message");
             var extraHotWaterActive = document.getElementById("extra-hot-water-active");
@@ -101,12 +190,31 @@
             var hotWaterSwitchOnHysteresis = document.getElementById("hot-water-switch-on-hysteresis");
             var hotWaterSwitchOffHysteresis = document.getElementById("hot-water-switch-off-hysteresis");
             var heatingLastCheck = document.getElementById("heating-last-check");
+            var heatingEnabled = document.getElementById("heating-enabled");
             var heatingStatusBox = document.getElementById("heating-status-box");
             var heatingStatusMessage = document.getElementById("heating-status-message");
             var heatingOffset = document.getElementById("heating-offset");
             var heatingTargets = document.getElementById("heating-targets");
             var heatingSwitchOnHysteresis = document.getElementById("heating-switch-on-hysteresis");
             var heatingSwitchOffHysteresis = document.getElementById("heating-switch-off-hysteresis");
+            var configPath = document.getElementById("config-path");
+            var configForm = document.getElementById("config-form");
+            var configSaveButton = document.getElementById("config-save");
+            var configSaveStatus = document.getElementById("config-save-status");
+            var configInputs = {
+                hotWaterPower: document.getElementById("hot-water-power"),
+                hotWaterSoc: document.getElementById("hot-water-soc"),
+                hotWaterSwitchOnHysteresisMinutes: document.getElementById("hot-water-switch-on"),
+                hotWaterSwitchOffHysteresisMinutes: document.getElementById("hot-water-switch-off"),
+                hotWaterActivationCutoff: document.getElementById("hot-water-cutoff"),
+                heatingPower: document.getElementById("heating-power"),
+                heatingSoc: document.getElementById("heating-soc"),
+                heatingSwitchOnHysteresisMinutes: document.getElementById("heating-switch-on"),
+                heatingSwitchOffHysteresisMinutes: document.getElementById("heating-switch-off"),
+                heatingNormalOffset: document.getElementById("heating-normal-offset"),
+                heatingPVOffset: document.getElementById("heating-pv-offset")
+            };
+            var configFormDirty = false;
 
             function formatValue(value, unit) {
                 if (typeof value !== "number") {
@@ -174,13 +282,49 @@
                 return value.toFixed(1) + " C";
             }
 
-            function render(status) {
+            function setInputValue(input, value, decimals) {
+                if (!input || typeof value !== "number") {
+                    return;
+                }
+
+                input.value = decimals === 0 ? String(Math.round(value)) : value.toFixed(decimals);
+            }
+
+            function renderConfig(configState, preserveDirtyValues) {
+                if (!configState) {
+                    return;
+                }
+
+                configPath.textContent = configState.path || "--";
+                if (preserveDirtyValues && configFormDirty) {
+                    return;
+                }
+
+                var hotWaterConfig = configState.hotWater || {};
+                var heatingConfig = configState.heating || {};
+
+                setInputValue(configInputs.hotWaterPower, hotWaterConfig.power, 2);
+                setInputValue(configInputs.hotWaterSoc, hotWaterConfig.soc, 2);
+                setInputValue(configInputs.hotWaterSwitchOnHysteresisMinutes, hotWaterConfig.switchOnHysteresisMinutes, 0);
+                setInputValue(configInputs.hotWaterSwitchOffHysteresisMinutes, hotWaterConfig.switchOffHysteresisMinutes, 0);
+                setInputValue(configInputs.hotWaterActivationCutoff, hotWaterConfig.activationCutoff, 0);
+                setInputValue(configInputs.heatingPower, heatingConfig.power, 2);
+                setInputValue(configInputs.heatingSoc, heatingConfig.soc, 2);
+                setInputValue(configInputs.heatingSwitchOnHysteresisMinutes, heatingConfig.switchOnHysteresisMinutes, 0);
+                setInputValue(configInputs.heatingSwitchOffHysteresisMinutes, heatingConfig.switchOffHysteresisMinutes, 0);
+                setInputValue(configInputs.heatingNormalOffset, heatingConfig.normalOffset, 1);
+                setInputValue(configInputs.heatingPVOffset, heatingConfig.pvOffset, 1);
+            }
+
+            function render(status, preserveDirtyValues) {
                 var energy = status.energy || {};
                 var hotWater = status.hotWater || {};
                 var heating = status.heating || {};
+                var configState = status.config || {};
 
                 energyPower.textContent = energy.pvData ? formatValue(energy.pvData.power, "W") : "--";
                 energySoc.textContent = energy.pvData ? formatValue(energy.pvData.soc, "%") : "--";
+                hotWaterEnabled.checked = Boolean(hotWater.enabled);
                 hotWaterLastCheck.textContent = formatTimestamp(hotWater.lastCheck);
                 hotWaterStatusMessage.textContent = hotWater.message || "";
                 hotWaterStatusBox.classList.toggle("active", Boolean(hotWater.isActive));
@@ -190,6 +334,7 @@
                 hotWaterSwitchOnHysteresis.textContent = formatHysteresis(hotWater, "switchOnHysteresis", hotWater.switchOnHysteresisMinutes);
                 hotWaterSwitchOffHysteresis.textContent = formatHysteresis(hotWater, "switchOffHysteresis", hotWater.switchOffHysteresisMinutes);
 
+                heatingEnabled.checked = Boolean(heating.enabled);
                 heatingLastCheck.textContent = formatTimestamp(heating.lastCheck);
                 heatingStatusMessage.textContent = heating.message || "";
                 heatingStatusBox.classList.toggle("active", Boolean(heating.isActive));
@@ -198,7 +343,93 @@
                 heatingTargets.textContent = formatTemperatureOffset(heating.normalOffset) + " / " + formatTemperatureOffset(heating.pvOffset);
                 heatingSwitchOnHysteresis.textContent = formatHysteresis(heating, "switchOnHysteresis", heating.switchOnHysteresisMinutes);
                 heatingSwitchOffHysteresis.textContent = formatHysteresis(heating, "switchOffHysteresis", heating.switchOffHysteresisMinutes);
+                renderConfig(configState, preserveDirtyValues !== false);
             }
+
+            function setControlsDisabled(disabled) {
+
+                hotWaterEnabled.disabled = disabled;
+                heatingEnabled.disabled = disabled;
+            }
+
+            function setConfigDisabled(disabled) {
+                configSaveButton.disabled = disabled;
+                Object.keys(configInputs).forEach(function (key) {
+                    configInputs[key].disabled = disabled;
+                });
+            }
+
+            function submitDaemonSettings() {
+                var body = new URLSearchParams();
+                body.set("hotWaterEnabled", String(hotWaterEnabled.checked));
+                body.set("heatingEnabled", String(heatingEnabled.checked));
+
+                setControlsDisabled(true);
+                fetch(new URL("api/daemons", window.location.href), {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/x-www-form-urlencoded"
+                    },
+                    body: body.toString()
+                }).then(function (response) {
+                    if (!response.ok) {
+                        throw new Error("Speichern fehlgeschlagen");
+                    }
+
+                    return response.json();
+                }).then(function (status) {
+                    render(status);
+                }).catch(function () {
+                    streamStatus.textContent = "Speichern fehlgeschlagen";
+                }).finally(function () {
+                    setControlsDisabled(false);
+                });
+            }
+
+            function submitConfig(event) {
+                event.preventDefault();
+
+                var body = new URLSearchParams();
+                Object.keys(configInputs).forEach(function (key) {
+                    body.set(key, configInputs[key].value);
+                });
+
+                setConfigDisabled(true);
+                configSaveStatus.textContent = "Speichere...";
+                fetch(new URL("api/config/thresholds", window.location.href), {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/x-www-form-urlencoded"
+                    },
+                    body: body.toString()
+                }).then(function (response) {
+                    if (!response.ok) {
+                        return response.text().then(function (message) {
+                            throw new Error(message || "Speichern fehlgeschlagen");
+                        });
+                    }
+
+                    return response.json();
+                }).then(function (status) {
+                    configFormDirty = false;
+                    configSaveStatus.textContent = "Gespeichert";
+                    render(status, false);
+                }).catch(function (error) {
+                    configSaveStatus.textContent = error && error.message ? error.message : "Speichern fehlgeschlagen";
+                }).finally(function () {
+                    setConfigDisabled(false);
+                });
+            }
+
+            hotWaterEnabled.addEventListener("change", submitDaemonSettings);
+            heatingEnabled.addEventListener("change", submitDaemonSettings);
+            configForm.addEventListener("submit", submitConfig);
+            Object.keys(configInputs).forEach(function (key) {
+                configInputs[key].addEventListener("input", function () {
+                    configFormDirty = true;
+                    configSaveStatus.textContent = "";
+                });
+            });
 
             var streamUrl = new URL("api/status/stream", window.location.href);
             var source = new EventSource(streamUrl);
@@ -207,7 +438,7 @@
             };
             source.onmessage = function (event) {
                 streamStatus.textContent = "Verbunden";
-                render(JSON.parse(event.data));
+                render(JSON.parse(event.data), true);
             };
             source.onerror = function () {
                 streamStatus.textContent = "Verbindung wird neu aufgebaut...";

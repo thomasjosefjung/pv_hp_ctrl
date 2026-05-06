@@ -5,7 +5,28 @@ import (
 	"time"
 
 	"pv_hp_ctrl/config"
+	"pv_hp_ctrl/pkg/state"
 )
+
+type fakeDisableClient struct {
+	extraHotWaterActive bool
+	temperature         float64
+	setCalls            []bool
+	setErr              error
+}
+
+func (c *fakeDisableClient) GetExtraHotWater(string) (bool, error) {
+	return c.extraHotWaterActive, nil
+}
+
+func (c *fakeDisableClient) SetExtraHotWater(_ string, enabled bool) error {
+	c.setCalls = append(c.setCalls, enabled)
+	return c.setErr
+}
+
+func (c *fakeDisableClient) GetDomesticWaterTemperature(string) (float64, error) {
+	return c.temperature, nil
+}
 
 func TestEnergyConditionsMet(t *testing.T) {
 	t.Run("requires pv power above threshold", func(t *testing.T) {
@@ -96,4 +117,31 @@ func TestHotWaterSwitchOffHysteresisDuration(t *testing.T) {
 			t.Fatalf("HotWaterSwitchOffHysteresisDuration() = %v, want %v", got, 10*time.Minute)
 		}
 	})
+}
+
+func TestDisableWithClientForcesExtraHotWaterOff(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.MyUplink.DeviceID = "device-1"
+	client := &fakeDisableClient{extraHotWaterActive: true, temperature: 48.5}
+
+	if err := disableWithClient(cfg, client, "disabled"); err != nil {
+		t.Fatalf("disableWithClient() error = %v", err)
+	}
+
+	if len(client.setCalls) != 1 || client.setCalls[0] {
+		t.Fatalf("SetExtraHotWater() calls = %v, want [false]", client.setCalls)
+	}
+
+	status := state.GetStatus().HotWater
+	if status.IsActive {
+		t.Fatal("expected hot-water daemon status to be inactive")
+	}
+
+	if status.ExtraHotWaterActive {
+		t.Fatal("expected extra hot water to be marked inactive")
+	}
+
+	if status.Message != "disabled" {
+		t.Fatalf("status message = %q, want %q", status.Message, "disabled")
+	}
 }

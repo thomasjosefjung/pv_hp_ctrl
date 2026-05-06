@@ -28,6 +28,13 @@ func RunTask() {
 
 	cfg := deps.Config
 	client := deps.Client
+	if !cfg.HotWaterDaemonEnabled() {
+		if err := disableWithClient(cfg, client, "Hot-water daemon disabled; extra hot water forced off"); err != nil {
+			log.Printf("Failed to force extra hot water off while daemon disabled: %v", err)
+		}
+		return
+	}
+
 	pvData := state.GetStatus().Energy.PVData
 	if pvData == nil {
 		state.SetHotWaterStatus("Shared energy status unavailable", false, false, nil, state.HysteresisStatus{}, state.HysteresisStatus{})
@@ -149,6 +156,49 @@ func RunTask() {
 		state.SetHotWaterStatus("Extra hot water activated", true, true, domesticHotWaterTempCelsius, state.HysteresisStatus{}, state.HysteresisStatus{})
 		log.Printf("Extra hot water activated at %s with PV power %.2f W", localNow.Format("2006-01-02 15:04:05 MST"), pvData.Power)
 	}
+}
+
+func Disable() error {
+	deps, err := daemoncore.LoadDependencies(config.DefaultPath, clientProvider)
+	if err != nil {
+		state.SetHotWaterStatus(fmt.Sprintf("Error: %v", err), false, false, nil, state.HysteresisStatus{}, state.HysteresisStatus{})
+		return err
+	}
+
+	return disableWithClient(deps.Config, deps.Client, "Hot-water daemon disabled; extra hot water forced off")
+}
+
+func disableWithClient(cfg *config.Config, client interface {
+	GetExtraHotWater(deviceID string) (bool, error)
+	SetExtraHotWater(deviceID string, enabled bool) error
+	GetDomesticWaterTemperature(deviceID string) (float64, error)
+}, message string) error {
+	timingState = daemoncore.TimingState{}
+
+	domesticHotWaterTempCelsius, err := loadDomesticWaterTemperature(client, cfg.MyUplink.DeviceID)
+	if err != nil {
+		log.Printf("Failed to get domestic hot water temperature while disabling daemon: %v", err)
+	}
+
+	extraHotWaterActive, readErr := client.GetExtraHotWater(cfg.MyUplink.DeviceID)
+	if readErr != nil {
+		log.Printf("Failed to get extra hot water status while disabling daemon: %v", readErr)
+	}
+
+	if err := client.SetExtraHotWater(cfg.MyUplink.DeviceID, false); err != nil {
+		state.SetHotWaterStatus(
+			fmt.Sprintf("Hot-water daemon disabled, but forcing extra hot water off failed: %v", err),
+			false,
+			extraHotWaterActive,
+			domesticHotWaterTempCelsius,
+			state.HysteresisStatus{},
+			state.HysteresisStatus{},
+		)
+		return err
+	}
+
+	state.SetHotWaterStatus(message, false, false, domesticHotWaterTempCelsius, state.HysteresisStatus{}, state.HysteresisStatus{})
+	return nil
 }
 
 func loadDomesticWaterTemperature(client interface {
