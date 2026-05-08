@@ -72,10 +72,6 @@
                     <div class="label">Restzeit bis Einschalten</div>
                     <div class="value" id="hot-water-switch-on-hysteresis">{{formatHysteresis .HotWater.SwitchOnHysteresis.Active .HotWater.SwitchOnHysteresis.RemainingSeconds .HotWater.SwitchOnHysteresisMinutes}}</div>
                 </div>
-                <div class="card">
-                    <div class="label">Restzeit bis Ausschalten</div>
-                    <div class="value" id="hot-water-switch-off-hysteresis">{{formatHysteresis .HotWater.SwitchOffHysteresis.Active .HotWater.SwitchOffHysteresis.RemainingSeconds .HotWater.SwitchOffHysteresisMinutes}}</div>
-                </div>
             </div>
         </section>
 
@@ -128,10 +124,6 @@
                         <div class="field">
                             <label for="hot-water-switch-on">Ein-Hysterese (min)</label>
                             <input id="hot-water-switch-on" name="hotWaterSwitchOnHysteresisMinutes" type="number" step="1" value="{{.Config.HotWater.SwitchOnHysteresisMinutes}}">
-                        </div>
-                        <div class="field">
-                            <label for="hot-water-switch-off">Aus-Hysterese (min)</label>
-                            <input id="hot-water-switch-off" name="hotWaterSwitchOffHysteresisMinutes" type="number" step="1" value="{{.Config.HotWater.SwitchOffHysteresisMinutes}}">
                         </div>
                         <div class="field">
                             <label for="hot-water-cutoff">Aktivierung bis Stunde</label>
@@ -192,7 +184,6 @@
             var extraHotWaterActive = document.getElementById("extra-hot-water-active");
             var hotWaterTemperature = document.getElementById("hot-water-temperature");
             var hotWaterSwitchOnHysteresis = document.getElementById("hot-water-switch-on-hysteresis");
-            var hotWaterSwitchOffHysteresis = document.getElementById("hot-water-switch-off-hysteresis");
             var heatingLastCheck = document.getElementById("heating-last-check");
             var heatingEnabled = document.getElementById("heating-enabled");
             var heatingStatusBox = document.getElementById("heating-status-box");
@@ -209,7 +200,6 @@
                 hotWaterPower: document.getElementById("hot-water-power"),
                 hotWaterSoc: document.getElementById("hot-water-soc"),
                 hotWaterSwitchOnHysteresisMinutes: document.getElementById("hot-water-switch-on"),
-                hotWaterSwitchOffHysteresisMinutes: document.getElementById("hot-water-switch-off"),
                 hotWaterActivationCutoff: document.getElementById("hot-water-cutoff"),
                 hotWaterExtraTemperature: document.getElementById("hot-water-extra-temperature"),
                 heatingPower: document.getElementById("heating-power"),
@@ -311,7 +301,6 @@
                 setInputValue(configInputs.hotWaterPower, hotWaterConfig.power, 2);
                 setInputValue(configInputs.hotWaterSoc, hotWaterConfig.soc, 2);
                 setInputValue(configInputs.hotWaterSwitchOnHysteresisMinutes, hotWaterConfig.switchOnHysteresisMinutes, 0);
-                setInputValue(configInputs.hotWaterSwitchOffHysteresisMinutes, hotWaterConfig.switchOffHysteresisMinutes, 0);
                 setInputValue(configInputs.hotWaterActivationCutoff, hotWaterConfig.activationCutoff, 0);
                 setInputValue(configInputs.hotWaterExtraTemperature, hotWaterConfig.extraHotWaterTemperature, 1);
                 setInputValue(configInputs.heatingPower, heatingConfig.power, 2);
@@ -338,7 +327,6 @@
                 extraHotWaterActive.textContent = hotWater.extraHotWaterActive ? "Ja" : "Nein";
                 hotWaterTemperature.textContent = formatTemperature(hotWater.domesticHotWaterTempCelsius);
                 hotWaterSwitchOnHysteresis.textContent = formatHysteresis(hotWater, "switchOnHysteresis", hotWater.switchOnHysteresisMinutes);
-                hotWaterSwitchOffHysteresis.textContent = formatHysteresis(hotWater, "switchOffHysteresis", hotWater.switchOffHysteresisMinutes);
 
                 heatingEnabled.checked = Boolean(heating.enabled);
                 heatingLastCheck.textContent = formatTimestamp(heating.lastCheck);

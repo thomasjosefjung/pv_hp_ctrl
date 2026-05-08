@@ -56,59 +56,13 @@ func RunTask() {
 
 	localNow := time.Now().In(time.Local)
 	switchOnHysteresis := cfg.HotWaterSwitchOnHysteresisDuration()
-	switchOffHysteresis := cfg.HotWaterSwitchOffHysteresisDuration()
 	powerThreshold := cfg.HotWaterPowerThreshold()
 
 	// The use-water daemon keeps only its domain-specific rules here.
 	// Polling, config loading, PV reads, myUplink client reuse, and hysteresis
 	// formatting live in pkg/daemoncore.
 	if extraHotWaterActive {
-		timingState.ConditionsMetSince = time.Time{}
-
-		if keepExtraHotWaterActive(pvData.Power, powerThreshold) {
-			timingState.ConditionsNotMetSince = time.Time{}
-			state.SetHotWaterStatus("Extra-WW aktiv", true, true, domesticHotWaterTempCelsius, state.HysteresisStatus{}, state.HysteresisStatus{})
-			log.Printf(
-				"Extra hot water remains active with PV power %.2f W and SOC %.2f%%",
-				pvData.Power,
-				pvData.Soc,
-			)
-		} else {
-			if timingState.ConditionsNotMetSince.IsZero() {
-				timingState.ConditionsNotMetSince = localNow
-				state.SetHotWaterStatus(
-					fmt.Sprintf("Extra-WW aktiv, Ausschaltverzoegerung laeuft (%s)", switchOffHysteresis),
-					true,
-					true,
-					domesticHotWaterTempCelsius,
-					state.HysteresisStatus{},
-					daemoncore.HysteresisStatus(switchOffHysteresis, timingState.ConditionsNotMetSince, localNow),
-				)
-				log.Printf("PV power dropped below switch-off threshold, starting switch-off hysteresis at %s", localNow.Format("2006-01-02 15:04:05 MST"))
-			} else if localNow.Sub(timingState.ConditionsNotMetSince) < switchOffHysteresis {
-				remaining := switchOffHysteresis - localNow.Sub(timingState.ConditionsNotMetSince)
-				state.SetHotWaterStatus(
-					fmt.Sprintf("Extra-WW aktiv, Ausschalten in %s", remaining.Round(time.Second)),
-					true,
-					true,
-					domesticHotWaterTempCelsius,
-					state.HysteresisStatus{},
-					daemoncore.HysteresisStatus(switchOffHysteresis, timingState.ConditionsNotMetSince, localNow),
-				)
-				log.Printf("Extra hot water still active during low-PV switch-off hysteresis, %s remaining", remaining.Round(time.Second))
-			} else {
-				err = client.SetExtraHotWater(cfg.MyUplink.DeviceID, false)
-				if err != nil {
-					log.Printf("Failed to disable extra hot water: %v", err)
-					state.SetHotWaterStatus(fmt.Sprintf("Error: %v", err), true, true, domesticHotWaterTempCelsius, state.HysteresisStatus{}, state.HysteresisStatus{})
-					return
-				}
-
-				timingState.ConditionsNotMetSince = time.Time{}
-				state.SetHotWaterStatus("Extra-WW ausgeschaltet", false, false, domesticHotWaterTempCelsius, state.HysteresisStatus{}, state.HysteresisStatus{})
-				log.Printf("Extra hot water deactivated at %s with PV power %.2f W", localNow.Format("2006-01-02 15:04:05 MST"), pvData.Power)
-			}
-		}
+		handleActiveExtraHotWater(pvData.Power, pvData.Soc, powerThreshold, domesticHotWaterTempCelsius)
 		return
 	}
 
@@ -227,6 +181,34 @@ func loadDomesticWaterTemperature(client interface {
 	}
 
 	return &temperature, nil
+}
+
+func handleActiveExtraHotWater(pvPower, soc, powerThreshold float64, domesticHotWaterTempCelsius *float64) {
+	timingState.ConditionsMetSince = time.Time{}
+	timingState.ConditionsNotMetSince = time.Time{}
+
+	if keepExtraHotWaterActive(pvPower, powerThreshold) {
+		state.SetHotWaterStatus("Extra-WW aktiv", true, true, domesticHotWaterTempCelsius, state.HysteresisStatus{}, state.HysteresisStatus{})
+		log.Printf(
+			"Extra hot water remains active with PV power %.2f W and SOC %.2f%%",
+			pvPower,
+			soc,
+		)
+		return
+	}
+
+	state.SetHotWaterStatus(
+		"Extra-WW aktiv, Abschaltung erfolgt nur durch Heizungssystem",
+		true,
+		true,
+		domesticHotWaterTempCelsius,
+		state.HysteresisStatus{},
+		state.HysteresisStatus{},
+	)
+	log.Printf(
+		"Extra hot water stays active although PV power dropped to %.2f W; daemon does not switch it off",
+		pvPower,
+	)
 }
 
 func energyConditionsMet(pvPower, soc, powerThreshold, socThreshold float64) bool {

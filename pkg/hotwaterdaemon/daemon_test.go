@@ -163,3 +163,72 @@ func TestDisableWithClientPreservesExtraHotWaterState(t *testing.T) {
 		})
 	}
 }
+
+func TestHandleActiveExtraHotWater(t *testing.T) {
+	originalTimingState := timingState
+	defer func() {
+		timingState = originalTimingState
+	}()
+
+	temperature := 49.2
+
+	t.Run("keeps active status when pv remains high", func(t *testing.T) {
+		timingState.ConditionsMetSince = time.Now().Add(-time.Minute)
+		timingState.ConditionsNotMetSince = time.Now().Add(-time.Minute)
+
+		handleActiveExtraHotWater(6000, 98, 5000, &temperature)
+
+		status := state.GetStatus().HotWater
+		if !status.IsActive {
+			t.Fatal("expected hot-water daemon status to remain active")
+		}
+
+		if !status.ExtraHotWaterActive {
+			t.Fatal("expected extra hot water to remain active")
+		}
+
+		if status.Message != "Extra-WW aktiv" {
+			t.Fatalf("status message = %q, want %q", status.Message, "Extra-WW aktiv")
+		}
+
+		if timingState.ConditionsMetSince != (time.Time{}) {
+			t.Fatal("expected switch-on hysteresis timestamp to be cleared")
+		}
+
+		if timingState.ConditionsNotMetSince != (time.Time{}) {
+			t.Fatal("expected switch-off hysteresis timestamp to be cleared")
+		}
+	})
+
+	t.Run("keeps active status when pv drops", func(t *testing.T) {
+		timingState.ConditionsMetSince = time.Now().Add(-time.Minute)
+		timingState.ConditionsNotMetSince = time.Now().Add(-time.Minute)
+
+		handleActiveExtraHotWater(1000, 98, 5000, &temperature)
+
+		status := state.GetStatus().HotWater
+		if !status.IsActive {
+			t.Fatal("expected hot-water daemon status to remain active")
+		}
+
+		if !status.ExtraHotWaterActive {
+			t.Fatal("expected extra hot water to remain active")
+		}
+
+		if status.Message != "Extra-WW aktiv, Abschaltung erfolgt nur durch Heizungssystem" {
+			t.Fatalf("status message = %q, want %q", status.Message, "Extra-WW aktiv, Abschaltung erfolgt nur durch Heizungssystem")
+		}
+
+		if status.SwitchOffHysteresis.Active {
+			t.Fatal("expected switch-off hysteresis to stay inactive")
+		}
+
+		if timingState.ConditionsMetSince != (time.Time{}) {
+			t.Fatal("expected switch-on hysteresis timestamp to be cleared")
+		}
+
+		if timingState.ConditionsNotMetSince != (time.Time{}) {
+			t.Fatal("expected switch-off hysteresis timestamp to be cleared")
+		}
+	})
+}

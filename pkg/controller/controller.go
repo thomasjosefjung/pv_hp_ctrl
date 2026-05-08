@@ -63,7 +63,12 @@ type energyStatusResponse struct {
 }
 
 type hotWaterStatusResponse struct {
-	daemonStatusResponse
+	LastCheck                  time.Time              `json:"lastCheck"`
+	Message                    string                 `json:"message"`
+	Enabled                    bool                   `json:"enabled"`
+	IsActive                   bool                   `json:"isActive"`
+	SwitchOnHysteresis         state.HysteresisStatus `json:"switchOnHysteresis"`
+	SwitchOnHysteresisMinutes  int                    `json:"switchOnHysteresisMinutes"`
 	ExtraHotWaterActive         bool     `json:"extraHotWaterActive"`
 	DomesticHotWaterTempCelsius *float64 `json:"domesticHotWaterTempCelsius,omitempty"`
 }
@@ -79,7 +84,6 @@ type hotWaterThresholdsResponse struct {
 	Power                      float64 `json:"power"`
 	Soc                        float64 `json:"soc"`
 	SwitchOnHysteresisMinutes  int     `json:"switchOnHysteresisMinutes"`
-	SwitchOffHysteresisMinutes int     `json:"switchOffHysteresisMinutes"`
 	ActivationCutoff           int     `json:"activationCutoff"`
 	ExtraHotWaterTemperature   float64 `json:"extraHotWaterTemperature"`
 }
@@ -208,12 +212,6 @@ func UpdateThresholds(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	hotWaterSwitchOff, err := parseIntFormValue(r, "hotWaterSwitchOffHysteresisMinutes")
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
 	hotWaterActivationCutoff, err := parseIntFormValue(r, "hotWaterActivationCutoff")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -274,7 +272,6 @@ func UpdateThresholds(w http.ResponseWriter, r *http.Request) {
 	cfg.ThresholdsHotWater.Power = hotWaterPower
 	cfg.ThresholdsHotWater.Soc = hotWaterSoc
 	cfg.ThresholdsHotWater.SwitchOnHysteresisMinutes = hotWaterSwitchOn
-	cfg.ThresholdsHotWater.SwitchOffHysteresisMinutes = hotWaterSwitchOff
 	cfg.ThresholdsHotWater.ActivationCutoff = hotWaterActivationCutoff
 	cfg.ThresholdsHotWater.ExtraHotWaterTemperature = hotWaterExtraTemperature
 	cfg.ThresholdsHeating.Power = heatingPower
@@ -344,16 +341,12 @@ func buildStatusResponse(status state.Status) statusResponse {
 			PVData: status.Energy.PVData,
 		},
 		HotWater: hotWaterStatusResponse{
-			daemonStatusResponse: daemonStatusResponse{
-				LastCheck:                  status.HotWater.LastCheck,
-				Message:                    status.HotWater.Message,
-				Enabled:                    cfg.HotWaterDaemonEnabled(),
-				IsActive:                   status.HotWater.IsActive,
-				SwitchOnHysteresis:         status.HotWater.SwitchOnHysteresis,
-				SwitchOffHysteresis:        status.HotWater.SwitchOffHysteresis,
-				SwitchOnHysteresisMinutes:  int(cfg.HotWaterSwitchOnHysteresisDuration() / time.Minute),
-				SwitchOffHysteresisMinutes: int(cfg.HotWaterSwitchOffHysteresisDuration() / time.Minute),
-			},
+			LastCheck:                  status.HotWater.LastCheck,
+			Message:                    status.HotWater.Message,
+			Enabled:                    cfg.HotWaterDaemonEnabled(),
+			IsActive:                   status.HotWater.IsActive,
+			SwitchOnHysteresis:         status.HotWater.SwitchOnHysteresis,
+			SwitchOnHysteresisMinutes:  int(cfg.HotWaterSwitchOnHysteresisDuration() / time.Minute),
 			ExtraHotWaterActive:         status.HotWater.ExtraHotWaterActive,
 			DomesticHotWaterTempCelsius: status.HotWater.DomesticHotWaterTempCelsius,
 		},
@@ -378,7 +371,6 @@ func buildStatusResponse(status state.Status) statusResponse {
 				Power:                      cfg.HotWaterPowerThreshold(),
 				Soc:                        cfg.HotWaterSocThreshold(),
 				SwitchOnHysteresisMinutes:  int(cfg.HotWaterSwitchOnHysteresisDuration() / time.Minute),
-				SwitchOffHysteresisMinutes: int(cfg.HotWaterSwitchOffHysteresisDuration() / time.Minute),
 				ActivationCutoff:           cfg.HotWaterActivationCutoffHour(),
 				ExtraHotWaterTemperature:   cfg.HotWaterExtraTemperature(),
 			},
