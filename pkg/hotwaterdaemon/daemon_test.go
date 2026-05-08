@@ -12,6 +12,7 @@ type fakeDisableClient struct {
 	extraHotWaterActive bool
 	temperature         float64
 	setCalls            []bool
+	setTemperatureCalls []float64
 	setErr              error
 }
 
@@ -21,6 +22,11 @@ func (c *fakeDisableClient) GetExtraHotWater(string) (bool, error) {
 
 func (c *fakeDisableClient) SetExtraHotWater(_ string, enabled bool) error {
 	c.setCalls = append(c.setCalls, enabled)
+	return c.setErr
+}
+
+func (c *fakeDisableClient) SetExtraHotWaterTemperature(_ string, value float64) error {
+	c.setTemperatureCalls = append(c.setTemperatureCalls, value)
 	return c.setErr
 }
 
@@ -119,29 +125,41 @@ func TestHotWaterSwitchOffHysteresisDuration(t *testing.T) {
 	})
 }
 
-func TestDisableWithClientForcesExtraHotWaterOff(t *testing.T) {
-	cfg := &config.Config{}
-	cfg.MyUplink.DeviceID = "device-1"
-	client := &fakeDisableClient{extraHotWaterActive: true, temperature: 48.5}
-
-	if err := disableWithClient(cfg, client, "disabled"); err != nil {
-		t.Fatalf("disableWithClient() error = %v", err)
+func TestDisableWithClientPreservesExtraHotWaterState(t *testing.T) {
+	tests := []struct {
+		name                string
+		extraHotWaterActive bool
+	}{
+		{name: "keeps active state", extraHotWaterActive: true},
+		{name: "keeps inactive state", extraHotWaterActive: false},
 	}
 
-	if len(client.setCalls) != 1 || client.setCalls[0] {
-		t.Fatalf("SetExtraHotWater() calls = %v, want [false]", client.setCalls)
-	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := &config.Config{}
+			cfg.MyUplink.DeviceID = "device-1"
+			client := &fakeDisableClient{extraHotWaterActive: test.extraHotWaterActive, temperature: 48.5}
 
-	status := state.GetStatus().HotWater
-	if status.IsActive {
-		t.Fatal("expected hot-water daemon status to be inactive")
-	}
+			if err := disableWithClient(cfg, client, "disabled"); err != nil {
+				t.Fatalf("disableWithClient() error = %v", err)
+			}
 
-	if status.ExtraHotWaterActive {
-		t.Fatal("expected extra hot water to be marked inactive")
-	}
+			if len(client.setCalls) != 0 {
+				t.Fatalf("SetExtraHotWater() calls = %v, want no calls", client.setCalls)
+			}
 
-	if status.Message != "disabled" {
-		t.Fatalf("status message = %q, want %q", status.Message, "disabled")
+			status := state.GetStatus().HotWater
+			if status.IsActive {
+				t.Fatal("expected hot-water daemon status to be inactive")
+			}
+
+			if status.ExtraHotWaterActive != test.extraHotWaterActive {
+				t.Fatalf("ExtraHotWaterActive = %v, want %v", status.ExtraHotWaterActive, test.extraHotWaterActive)
+			}
+
+			if status.Message != "disabled" {
+				t.Fatalf("status message = %q, want %q", status.Message, "disabled")
+			}
+		})
 	}
 }

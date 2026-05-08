@@ -30,7 +30,7 @@ func RunTask() {
 	cfg := deps.Config
 	client := deps.Client
 	if !cfg.HeatingDaemonEnabled() {
-		if err := disableWithClient(cfg, client, "Heating daemon disabled; normal offset restored"); err != nil {
+		if err := disableWithClient(cfg, client, "Heiz-Daemon deaktiviert"); err != nil {
 			log.Printf("Failed to restore normal heating offset while daemon disabled: %v", err)
 		}
 		return
@@ -38,7 +38,7 @@ func RunTask() {
 
 	pvData := state.GetStatus().Energy.PVData
 	if pvData == nil {
-		state.SetHeatingStatus("Shared energy status unavailable", false, 0, state.HysteresisStatus{}, state.HysteresisStatus{})
+		state.SetHeatingStatus("Energiedaten fehlen", false, 0, state.HysteresisStatus{}, state.HysteresisStatus{})
 		return
 	}
 
@@ -65,13 +65,13 @@ func RunTask() {
 
 		if heatingConditionsMet(pvData.Power, pvData.Soc, powerThreshold, socThreshold) {
 			timingState.ConditionsNotMetSince = time.Time{}
-			state.SetHeatingStatus("Heating offset active; conditions still met", true, currentOffset, state.HysteresisStatus{}, state.HysteresisStatus{})
+			state.SetHeatingStatus("Heiz-Offset aktiv", true, currentOffset, state.HysteresisStatus{}, state.HysteresisStatus{})
 			log.Printf("Heating offset remains active with PV power %.2f W and offset %.1f C", pvData.Power, currentOffset)
 		} else {
 			if timingState.ConditionsNotMetSince.IsZero() {
 				timingState.ConditionsNotMetSince = localNow
 				state.SetHeatingStatus(
-					fmt.Sprintf("Heating offset active; switch-off hysteresis started (%s)", switchOffHysteresis),
+					fmt.Sprintf("Heiz-Offset aktiv, Ausschaltverzoegerung laeuft (%s)", switchOffHysteresis),
 					true,
 					currentOffset,
 					state.HysteresisStatus{},
@@ -81,7 +81,7 @@ func RunTask() {
 			} else if localNow.Sub(timingState.ConditionsNotMetSince) < switchOffHysteresis {
 				remaining := switchOffHysteresis - localNow.Sub(timingState.ConditionsNotMetSince)
 				state.SetHeatingStatus(
-					fmt.Sprintf("Heating offset active; waiting %s before switch-off", remaining.Round(time.Second)),
+					fmt.Sprintf("Heiz-Offset aktiv, Ausschalten in %s", remaining.Round(time.Second)),
 					true,
 					currentOffset,
 					state.HysteresisStatus{},
@@ -92,12 +92,12 @@ func RunTask() {
 				err = client.SetHeatingTemperatureOffset(cfg.MyUplink.DeviceID, normalOffset)
 				if err != nil {
 					log.Printf("Failed to reset heating temperature offset: %v", err)
-					state.SetHeatingStatus(fmt.Sprintf("Error: %v", err), true, currentOffset, state.HysteresisStatus{}, state.HysteresisStatus{})
+					state.SetHeatingStatus(fmt.Sprintf("Fehler: %v", err), true, currentOffset, state.HysteresisStatus{}, state.HysteresisStatus{})
 					return
 				}
 
 				timingState.ConditionsNotMetSince = time.Time{}
-				state.SetHeatingStatus("Heating offset deactivated; conditions no longer met", false, normalOffset, state.HysteresisStatus{}, state.HysteresisStatus{})
+				state.SetHeatingStatus("Heiz-Offset ausgeschaltet", false, normalOffset, state.HysteresisStatus{}, state.HysteresisStatus{})
 				log.Printf("Heating offset deactivated at %s with PV power %.2f W", localNow.Format("2006-01-02 15:04:05 MST"), pvData.Power)
 			}
 		}
@@ -106,12 +106,12 @@ func RunTask() {
 
 		if !heatingConditionsMet(pvData.Power, pvData.Soc, powerThreshold, socThreshold) {
 			timingState.ConditionsMetSince = time.Time{}
-			state.SetHeatingStatus("Conditions not met for heating offset", false, currentOffset, state.HysteresisStatus{}, state.HysteresisStatus{})
+			state.SetHeatingStatus("Bedingungen nicht erfuellt", false, currentOffset, state.HysteresisStatus{}, state.HysteresisStatus{})
 			log.Println("Conditions not met for heating offset")
 		} else if timingState.ConditionsMetSince.IsZero() {
 			timingState.ConditionsMetSince = localNow
 			state.SetHeatingStatus(
-				fmt.Sprintf("Conditions met; switch-on hysteresis started (%s)", switchOnHysteresis),
+				fmt.Sprintf("Bedingungen erfuellt, Einschaltverzoegerung laeuft (%s)", switchOnHysteresis),
 				false,
 				currentOffset,
 				daemoncore.HysteresisStatus(switchOnHysteresis, timingState.ConditionsMetSince, localNow),
@@ -121,7 +121,7 @@ func RunTask() {
 		} else if localNow.Sub(timingState.ConditionsMetSince) < switchOnHysteresis {
 			remaining := switchOnHysteresis - localNow.Sub(timingState.ConditionsMetSince)
 			state.SetHeatingStatus(
-				fmt.Sprintf("Conditions met; waiting %s before heating offset activation", remaining.Round(time.Second)),
+				fmt.Sprintf("Einschalten in %s", remaining.Round(time.Second)),
 				false,
 				currentOffset,
 				daemoncore.HysteresisStatus(switchOnHysteresis, timingState.ConditionsMetSince, localNow),
@@ -132,12 +132,12 @@ func RunTask() {
 			err = client.SetHeatingTemperatureOffset(cfg.MyUplink.DeviceID, pvOffset)
 			if err != nil {
 				log.Printf("Failed to set heating temperature offset: %v", err)
-				state.SetHeatingStatus(fmt.Sprintf("Error: %v", err), false, currentOffset, state.HysteresisStatus{}, state.HysteresisStatus{})
+				state.SetHeatingStatus(fmt.Sprintf("Fehler: %v", err), false, currentOffset, state.HysteresisStatus{}, state.HysteresisStatus{})
 				return
 			}
 
 			timingState.ConditionsMetSince = time.Time{}
-			state.SetHeatingStatus("Heating offset activated", true, pvOffset, state.HysteresisStatus{}, state.HysteresisStatus{})
+			state.SetHeatingStatus("Heiz-Offset eingeschaltet", true, pvOffset, state.HysteresisStatus{}, state.HysteresisStatus{})
 			log.Printf("Heating offset activated at %s with PV power %.2f W", localNow.Format("2006-01-02 15:04:05 MST"), pvData.Power)
 		}
 	}
@@ -146,11 +146,11 @@ func RunTask() {
 func Disable() error {
 	deps, err := daemoncore.LoadDependencies(config.DefaultPath, clientProvider)
 	if err != nil {
-		state.SetHeatingStatus(fmt.Sprintf("Error: %v", err), false, 0, state.HysteresisStatus{}, state.HysteresisStatus{})
+		state.SetHeatingStatus(fmt.Sprintf("Fehler: %v", err), false, 0, state.HysteresisStatus{}, state.HysteresisStatus{})
 		return err
 	}
 
-	return disableWithClient(deps.Config, deps.Client, "Heating daemon disabled; normal offset restored")
+	return disableWithClient(deps.Config, deps.Client, "Heiz-Daemon deaktiviert")
 }
 
 func disableWithClient(cfg *config.Config, client interface {
@@ -168,7 +168,7 @@ func disableWithClient(cfg *config.Config, client interface {
 	normalOffset := cfg.HeatingNormalOffset()
 	if err := client.SetHeatingTemperatureOffset(cfg.MyUplink.DeviceID, normalOffset); err != nil {
 		state.SetHeatingStatus(
-			fmt.Sprintf("Heating daemon disabled, but restoring normal offset failed: %v", err),
+			fmt.Sprintf("Heiz-Daemon deaktiviert, Ruecksetzen fehlgeschlagen: %v", err),
 			false,
 			currentOffset,
 			state.HysteresisStatus{},

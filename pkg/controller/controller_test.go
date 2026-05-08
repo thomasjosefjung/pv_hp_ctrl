@@ -131,6 +131,10 @@ func TestBuildStatusResponseUsesConfiguredValues(t *testing.T) {
 		t.Fatalf("Config.HotWater.Power = %v, want 5000", response.Config.HotWater.Power)
 	}
 
+	if response.Config.HotWater.ExtraHotWaterTemperature != 0 {
+		t.Fatalf("Config.HotWater.ExtraHotWaterTemperature = %v, want 0", response.Config.HotWater.ExtraHotWaterTemperature)
+	}
+
 	if response.Config.Heating.SwitchOffHysteresisMinutes != 10 {
 		t.Fatalf("Config.Heating.SwitchOffHysteresisMinutes = %d, want 10", response.Config.Heating.SwitchOffHysteresisMinutes)
 	}
@@ -276,6 +280,7 @@ func TestUpdateThresholdsPersistsConfigValues(t *testing.T) {
 	form.Set("hotWaterSwitchOnHysteresisMinutes", "7")
 	form.Set("hotWaterSwitchOffHysteresisMinutes", "11")
 	form.Set("hotWaterActivationCutoff", "15")
+	form.Set("hotWaterExtraTemperature", "58.5")
 	form.Set("heatingPower", "5400")
 	form.Set("heatingSoc", "79")
 	form.Set("heatingSwitchOnHysteresisMinutes", "4")
@@ -305,6 +310,10 @@ func TestUpdateThresholdsPersistsConfigValues(t *testing.T) {
 
 	if cfg.ThresholdsHotWater.SwitchOffHysteresisMinutes != 11 {
 		t.Fatalf("ThresholdsHotWater.SwitchOffHysteresisMinutes = %d, want 11", cfg.ThresholdsHotWater.SwitchOffHysteresisMinutes)
+	}
+
+	if cfg.ThresholdsHotWater.ExtraHotWaterTemperature != 58.5 {
+		t.Fatalf("ThresholdsHotWater.ExtraHotWaterTemperature = %v, want 58.5", cfg.ThresholdsHotWater.ExtraHotWaterTemperature)
 	}
 
 	if cfg.ThresholdsHeating.Power != 5400 {

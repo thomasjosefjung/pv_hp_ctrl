@@ -16,7 +16,9 @@ const (
 	oauthTokenURL            = "https://api.myuplink.com/oauth/token"
 	apiBaseURL               = "https://api.myuplink.com/v2"
 	extraHotWaterParamID     = "25001"
+	extraHotWaterTempParamID = "6146"
 	domesticWaterTempParamID = "6"
+	operationModeParamID     = "17"
 	heatingOffsetParamID     = "5001"
 	tokenRefreshLeeway       = 30 * time.Second
 )
@@ -30,6 +32,44 @@ type TokenResponse struct {
 
 type Parameter struct {
 	Value float64 `json:"value"`
+}
+
+type OperationModeValue float64
+
+const (
+	OperationModeHeatingOperation    OperationModeValue = 0
+	OperationModeDomesticHotWater    OperationModeValue = 1
+	OperationModeSwimmingPool        OperationModeValue = 2
+	OperationModeEVUCutOffTime       OperationModeValue = 3
+	OperationModeForcedDefrosting    OperationModeValue = 4
+	OperationModeNoRequest           OperationModeValue = 5
+	OperationModeHeatExtEnergySource OperationModeValue = 6
+	OperationModeCoolingMode         OperationModeValue = 7
+)
+
+var OperationModeOptions = struct {
+	HeatingOperation    OperationModeValue
+	DomesticHotWater    OperationModeValue
+	SwimmingPool        OperationModeValue
+	EVUCutOffTime       OperationModeValue
+	ForcedDefrosting    OperationModeValue
+	NoRequest           OperationModeValue
+	HeatExtEnergySource OperationModeValue
+	CoolingMode         OperationModeValue
+}{
+	HeatingOperation:    OperationModeHeatingOperation,
+	DomesticHotWater:    OperationModeDomesticHotWater,
+	SwimmingPool:        OperationModeSwimmingPool,
+	EVUCutOffTime:       OperationModeEVUCutOffTime,
+	ForcedDefrosting:    OperationModeForcedDefrosting,
+	NoRequest:           OperationModeNoRequest,
+	HeatExtEnergySource: OperationModeHeatExtEnergySource,
+	CoolingMode:         OperationModeCoolingMode,
+}
+
+type OperationMode struct {
+	Value OperationModeValue `json:"value"`
+	Text  string             `json:"text"`
 }
 
 type Client struct {
@@ -183,6 +223,11 @@ func (c *Client) SetExtraHotWater(deviceID string, enabled bool) error {
 	return c.setDeviceParameter(deviceID, extraHotWaterParamID, value, "failed to update extra hot water")
 }
 
+func (c *Client) SetExtraHotWaterTemperature(deviceID string, value float64) error {
+	formatted := strconv.FormatFloat(value, 'f', -1, 64)
+	return c.setDeviceParameter(deviceID, extraHotWaterTempParamID, formatted, "failed to update extra hot water temperature")
+}
+
 func (c *Client) GetExtraHotWater(deviceID string) (bool, error) {
 	value, err := c.getDeviceParameter(deviceID, extraHotWaterParamID, "failed to get extra hot water status")
 	if err != nil {
@@ -194,6 +239,20 @@ func (c *Client) GetExtraHotWater(deviceID string) (bool, error) {
 
 func (c *Client) GetDomesticWaterTemperature(deviceID string) (float64, error) {
 	return c.getDeviceParameter(deviceID, domesticWaterTempParamID, "failed to get domestic hot water temperature")
+}
+
+func (c *Client) GetOperationMode(deviceID string) (OperationMode, error) {
+	value, err := c.getDeviceParameter(deviceID, operationModeParamID, "failed to get heat pump operation mode")
+	if err != nil {
+		return OperationMode{}, err
+	}
+
+	modeValue := OperationModeValue(value)
+
+	return OperationMode{
+		Value: modeValue,
+		Text:  operationModeText(modeValue),
+	}, nil
 }
 
 func (c *Client) SetHeatingTemperatureOffset(deviceID string, value float64) error {
@@ -244,4 +303,27 @@ func (c *Client) getDeviceParameter(deviceID, parameterID, errorPrefix string) (
 	}
 
 	return parameters[0].Value, nil
+}
+
+func operationModeText(value OperationModeValue) string {
+	switch value {
+	case OperationModeHeatingOperation:
+		return "heating operation"
+	case OperationModeDomesticHotWater:
+		return "domestic hot water"
+	case OperationModeSwimmingPool:
+		return "swimming pool"
+	case OperationModeEVUCutOffTime:
+		return "evu cut-off time"
+	case OperationModeForcedDefrosting:
+		return "forced defrosting"
+	case OperationModeNoRequest:
+		return "no request"
+	case OperationModeHeatExtEnergySource:
+		return "heat.ext.energ.source"
+	case OperationModeCoolingMode:
+		return "cooling mode"
+	default:
+		return "unknown"
+	}
 }

@@ -44,6 +44,7 @@ type Config struct {
 		SwitchOnHysteresisMinutes  int     `json:"switch_on_hysteresis_minutes"`
 		SwitchOffHysteresisMinutes int     `json:"switch_off_hysteresis_minutes"`
 		ActivationCutoff           int     `json:"activation_cutoff"`
+		ExtraHotWaterTemperature   float64 `json:"extra_hot_water_temperature,omitempty"`
 	} `json:"thresholds_hot_water"`
 	ThresholdsHeating struct {
 		Power                      float64  `json:"power"`
@@ -156,6 +157,14 @@ func (c *Config) HotWaterActivationCutoffHour() int {
 	}
 
 	return defaultActivationCutoffHour
+}
+
+func (c *Config) HotWaterExtraTemperature() float64 {
+	if c != nil && c.ThresholdsHotWater.ExtraHotWaterTemperature > 0 {
+		return c.ThresholdsHotWater.ExtraHotWaterTemperature
+	}
+
+	return 0
 }
 
 func (c *Config) HeatingPowerThreshold() float64 {
