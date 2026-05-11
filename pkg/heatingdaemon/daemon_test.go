@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"pv_hp_ctrl/config"
+	"pv_hp_ctrl/pkg/myuplink"
 	"pv_hp_ctrl/pkg/state"
 )
 
@@ -43,6 +44,63 @@ func TestHeatingConditionsMet(t *testing.T) {
 			t.Fatal("expected heating offset to activate above SOC threshold")
 		}
 	})
+}
+
+func TestOperationModeAllowsHeatingOffset(t *testing.T) {
+	tests := []struct {
+		name          string
+		operationMode myuplink.OperationMode
+		want          bool
+	}{
+		{
+			name: "allows heating operation",
+			operationMode: myuplink.OperationMode{
+				Value: myuplink.OperationModeOptions.HeatingOperation,
+				Text:  "Heating operation",
+			},
+			want: true,
+		},
+		{
+			name: "allows domestic hot water",
+			operationMode: myuplink.OperationMode{
+				Value: myuplink.OperationModeOptions.DomesticHotWater,
+				Text:  "Domestic hot water",
+			},
+			want: true,
+		},
+		{
+			name: "allows forced defrosting",
+			operationMode: myuplink.OperationMode{
+				Value: myuplink.OperationModeOptions.ForcedDefrosting,
+				Text:  "Forced defrosting",
+			},
+			want: true,
+		},
+		{
+			name: "rejects no request",
+			operationMode: myuplink.OperationMode{
+				Value: myuplink.OperationModeOptions.NoRequest,
+				Text:  "No request",
+			},
+			want: false,
+		},
+		{
+			name: "rejects cooling mode",
+			operationMode: myuplink.OperationMode{
+				Value: myuplink.OperationModeOptions.CoolingMode,
+				Text:  "Cooling mode",
+			},
+			want: false,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := operationModeAllowsHeatingOffset(test.operationMode); got != test.want {
+				t.Fatalf("operationModeAllowsHeatingOffset(%v) = %v, want %v", test.operationMode.Value, got, test.want)
+			}
+		})
+	}
 }
 
 func TestHeatingConfigDefaultsAndOverrides(t *testing.T) {

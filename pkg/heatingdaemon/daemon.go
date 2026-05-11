@@ -6,6 +6,7 @@ import (
 	"math"
 	"pv_hp_ctrl/config"
 	"pv_hp_ctrl/pkg/daemoncore"
+	"pv_hp_ctrl/pkg/myuplink"
 	"pv_hp_ctrl/pkg/state"
 	"time"
 )
@@ -64,11 +65,13 @@ func RunTask() {
 		timingState.ConditionsMetSince = time.Time{}
 
 		if heatingConditionsMet(pvData.Power, pvData.Soc, powerThreshold, socThreshold) {
+			// Die PV-Bedingungen passen weiter; der aktive Heiz-Offset bleibt unveraendert eingeschaltet.
 			timingState.ConditionsNotMetSince = time.Time{}
 			state.SetHeatingStatus("Heiz-Offset aktiv", true, currentOffset, state.HysteresisStatus{}, state.HysteresisStatus{})
 			log.Printf("Heating offset remains active with PV power %.2f W and offset %.1f C", pvData.Power, currentOffset)
 		} else {
 			if timingState.ConditionsNotMetSince.IsZero() {
+				// Die Abschalt-Hysterese startet, sobald die Freigabebedingungen erstmals nicht mehr gelten.
 				timingState.ConditionsNotMetSince = localNow
 				state.SetHeatingStatus(
 					fmt.Sprintf("Heiz-Offset aktiv, Ausschaltverzoegerung laeuft (%s)", switchOffHysteresis),
@@ -79,6 +82,7 @@ func RunTask() {
 				)
 				log.Printf("Heating offset no longer meets conditions, starting switch-off hysteresis at %s", localNow.Format("2006-01-02 15:04:05 MST"))
 			} else if localNow.Sub(timingState.ConditionsNotMetSince) < switchOffHysteresis {
+				// Die Bedingungen bleiben zu schlecht, aber die Ausschalt-Hysterese laeuft noch.
 				remaining := switchOffHysteresis - localNow.Sub(timingState.ConditionsNotMetSince)
 				state.SetHeatingStatus(
 					fmt.Sprintf("Heiz-Offset aktiv, Ausschalten in %s", remaining.Round(time.Second)),
@@ -89,6 +93,7 @@ func RunTask() {
 				)
 				log.Printf("Heating offset still active during switch-off hysteresis, %s remaining", remaining.Round(time.Second))
 			} else {
+				// Die Bedingungen sind lang genug unterschritten; der Heiz-Offset wird auf Normalwert zurueckgesetzt.
 				err = client.SetHeatingTemperatureOffset(cfg.MyUplink.DeviceID, normalOffset)
 				if err != nil {
 					log.Printf("Failed to reset heating temperature offset: %v", err)
@@ -105,10 +110,28 @@ func RunTask() {
 		timingState.ConditionsNotMetSince = time.Time{}
 
 		if !heatingConditionsMet(pvData.Power, pvData.Soc, powerThreshold, socThreshold) {
+			// PV-Leistung oder Batteriestand reichen aktuell noch nicht fuer den Heiz-Offset.
 			timingState.ConditionsMetSince = time.Time{}
 			state.SetHeatingStatus("Bedingungen nicht erfuellt", false, currentOffset, state.HysteresisStatus{}, state.HysteresisStatus{})
 			log.Println("Conditions not met for heating offset")
+		} else if operationMode, err := client.GetOperationMode(cfg.MyUplink.DeviceID); err != nil {
+			// Die Energiewerte passen, aber der Betriebszustand der WP konnte nicht gelesen werden.
+			timingState.ConditionsMetSince = time.Time{}
+			log.Printf("Failed to get heat pump operation mode: %v", err)
+			state.SetHeatingStatus(fmt.Sprintf("Fehler: %v", err), false, currentOffset, state.HysteresisStatus{}, state.HysteresisStatus{})
+		} else if !operationModeAllowsHeatingOffset(operationMode) {
+			// Die WP laeuft in einer Betriebsart, in der der Heiz-Offset bewusst nicht aktiviert wird.
+			timingState.ConditionsMetSince = time.Time{}
+			state.SetHeatingStatus(
+				fmt.Sprintf("Bedingungen erfuellt, aber WP laeuft nicht (Betriebsart: %s)", operationMode.Text),
+				false,
+				currentOffset,
+				state.HysteresisStatus{},
+				state.HysteresisStatus{},
+			)
+			log.Printf("Bedingungen erfuellt, aber WP laeuft nicht; Betriebsart ist %s", operationMode.Text)
 		} else if timingState.ConditionsMetSince.IsZero() {
+			// Die Einschalt-Hysterese startet, sobald alle Freigabebedingungen erstmals gleichzeitig gelten.
 			timingState.ConditionsMetSince = localNow
 			state.SetHeatingStatus(
 				fmt.Sprintf("Bedingungen erfuellt, Einschaltverzoegerung laeuft (%s)", switchOnHysteresis),
@@ -119,6 +142,7 @@ func RunTask() {
 			)
 			log.Printf("Conditions met for heating offset, starting switch-on hysteresis at %s", localNow.Format("2006-01-02 15:04:05 MST"))
 		} else if localNow.Sub(timingState.ConditionsMetSince) < switchOnHysteresis {
+			// Die Bedingungen bleiben stabil, aber die Einschalt-Hysterese ist noch nicht abgelaufen.
 			remaining := switchOnHysteresis - localNow.Sub(timingState.ConditionsMetSince)
 			state.SetHeatingStatus(
 				fmt.Sprintf("Einschalten in %s", remaining.Round(time.Second)),
@@ -129,6 +153,7 @@ func RunTask() {
 			)
 			log.Printf("Heating switch-on hysteresis still active, %s remaining", remaining.Round(time.Second))
 		} else {
+			// Alle Bedingungen inklusive Hysterese sind erfuellt; der PV-Heiz-Offset wird jetzt gesetzt.
 			err = client.SetHeatingTemperatureOffset(cfg.MyUplink.DeviceID, pvOffset)
 			if err != nil {
 				log.Printf("Failed to set heating temperature offset: %v", err)
@@ -183,6 +208,12 @@ func disableWithClient(cfg *config.Config, client interface {
 
 func heatingConditionsMet(pvPower, soc, powerThreshold, socThreshold float64) bool {
 	return pvPower > powerThreshold && soc > socThreshold
+}
+
+func operationModeAllowsHeatingOffset(operationMode myuplink.OperationMode) bool {
+	return operationMode.Value == myuplink.OperationModeOptions.HeatingOperation ||
+		operationMode.Value == myuplink.OperationModeOptions.DomesticHotWater ||
+		operationMode.Value == myuplink.OperationModeOptions.ForcedDefrosting
 }
 
 func offsetsEqual(left, right float64) bool {
