@@ -70,16 +70,19 @@ func RunTask() {
 	activationAllowed := localNow.Hour() < cfg.HotWaterActivationCutoffHour()
 
 	if !energyConditionsMet(pvData.Power, pvData.Soc, powerThreshold, cfg.ThresholdsHotWater.Soc) {
+		// PV-Leistung oder Batteriestand reichen aktuell noch nicht fuer Extra-WW.
 		timingState.ConditionsMetSince = time.Time{}
 		state.SetHotWaterStatus("Bedingungen nicht erfuellt", false, false, domesticHotWaterTempCelsius, state.HysteresisStatus{}, state.HysteresisStatus{})
 		log.Println("Conditions not met for extra hot water")
 	} else if operationMode, err := client.GetOperationMode(cfg.MyUplink.DeviceID); err != nil {
+		// Die Energiewerte passen, aber der Betriebszustand der WP konnte nicht gelesen werden.
 		timingState.ConditionsMetSince = time.Time{}
 		log.Printf("Failed to get heat pump operation mode: %v", err)
 		state.SetHotWaterStatus(fmt.Sprintf("Fehler: %v", err), false, false, domesticHotWaterTempCelsius, state.HysteresisStatus{}, state.HysteresisStatus{})
 	} else if operationMode.Value != myuplink.OperationModeOptions.HeatingOperation &&
 		operationMode.Value != myuplink.OperationModeOptions.DomesticHotWater &&
 		operationMode.Value != myuplink.OperationModeOptions.ForcedDefrosting {
+		// Die WP laeuft in einer Betriebsart, in der Extra-WW bewusst nicht gestartet wird.
 		timingState.ConditionsMetSince = time.Time{}
 		state.SetHotWaterStatus(
 			fmt.Sprintf("Bedingungen erfuellt, aber WP laeuft nicht (Betriebsart: %s)", operationMode.Text),
@@ -91,10 +94,12 @@ func RunTask() {
 		)
 		log.Printf("Bedingungen erfuellt, aber WP laeuft nicht; Betriebsart ist %s", operationMode.Text)
 	} else if !activationAllowed {
+		// Nach der konfigurierten Tagesgrenze wird kein neuer Extra-WW-Zyklus mehr gestartet.
 		timingState.ConditionsMetSince = time.Time{}
 		state.SetHotWaterStatus("Zu spaet fuer Aktivierung", false, false, domesticHotWaterTempCelsius, state.HysteresisStatus{}, state.HysteresisStatus{})
 		log.Println("Conditions met, but activation cutoff for today has passed")
 	} else if timingState.ConditionsMetSince.IsZero() {
+		// Die Einschalt-Hysterese startet, sobald alle Freigabebedingungen erstmals gleichzeitig gelten.
 		timingState.ConditionsMetSince = localNow
 		state.SetHotWaterStatus(
 			fmt.Sprintf("Bedingungen erfuellt, Einschaltverzoegerung laeuft (%s)", switchOnHysteresis),
@@ -106,6 +111,7 @@ func RunTask() {
 		)
 		log.Printf("Conditions met, starting switch-on hysteresis at %s", localNow.Format("2006-01-02 15:04:05 MST"))
 	} else if localNow.Sub(timingState.ConditionsMetSince) < switchOnHysteresis {
+		// Die Bedingungen bleiben stabil, aber die Einschalt-Hysterese ist noch nicht abgelaufen.
 		remaining := switchOnHysteresis - localNow.Sub(timingState.ConditionsMetSince)
 		state.SetHotWaterStatus(
 			fmt.Sprintf("Einschalten in %s", remaining.Round(time.Second)),
@@ -117,6 +123,7 @@ func RunTask() {
 		)
 		log.Printf("Switch-on hysteresis still active, %s remaining", remaining.Round(time.Second))
 	} else {
+		// Alle Bedingungen inklusive Hysterese sind erfuellt; Extra-WW wird jetzt aktiviert.
 		extraTemperature := cfg.HotWaterExtraTemperature()
 		if extraTemperature > 0 {
 			err = client.SetExtraHotWaterTemperature(cfg.MyUplink.DeviceID, extraTemperature)
