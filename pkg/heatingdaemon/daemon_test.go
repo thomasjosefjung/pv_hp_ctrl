@@ -103,6 +103,20 @@ func TestOperationModeAllowsHeatingOffset(t *testing.T) {
 	}
 }
 
+func TestHeatingModeAllowsOffset(t *testing.T) {
+	t.Run("allows automatic mode", func(t *testing.T) {
+		if !heatingModeAllowsOffset(myuplink.HeatingMode{Value: myuplink.HeatingModeOptions.Automatic, Text: "automatic"}) {
+			t.Fatal("expected heating offset to activate in automatic mode")
+		}
+	})
+
+	t.Run("rejects non automatic mode", func(t *testing.T) {
+		if heatingModeAllowsOffset(myuplink.HeatingMode{Value: myuplink.HeatingModeOptions.Party, Text: "party"}) {
+			t.Fatal("expected heating offset to remain off outside automatic mode")
+		}
+	})
+}
+
 func TestHeatingConfigDefaultsAndOverrides(t *testing.T) {
 	t.Run("uses configured values when present", func(t *testing.T) {
 		cfg := &config.Config{}

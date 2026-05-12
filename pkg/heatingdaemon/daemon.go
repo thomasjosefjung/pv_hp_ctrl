@@ -130,6 +130,22 @@ func RunTask() {
 				state.HysteresisStatus{},
 			)
 			log.Printf("Bedingungen erfuellt, aber WP laeuft nicht; Betriebsart ist %s", operationMode.Text)
+		} else if heatingMode, err := client.GetHeatingMode(cfg.MyUplink.DeviceID); err != nil {
+			// Die WP laeuft, aber der Heizungs-Betriebsmodus konnte nicht gelesen werden.
+			timingState.ConditionsMetSince = time.Time{}
+			log.Printf("Failed to get heating operation mode: %v", err)
+			state.SetHeatingStatus(fmt.Sprintf("Fehler: %v", err), false, currentOffset, state.HysteresisStatus{}, state.HysteresisStatus{})
+		} else if !heatingModeAllowsOffset(heatingMode) {
+			// Der Heiz-Offset darf nur im Automatikmodus aktiviert werden.
+			timingState.ConditionsMetSince = time.Time{}
+			state.SetHeatingStatus(
+				fmt.Sprintf("Bedingungen erfuellt, aber Heizung ist nicht auf Automatik (Betriebsmodus: %s)", heatingMode.Text),
+				false,
+				currentOffset,
+				state.HysteresisStatus{},
+				state.HysteresisStatus{},
+			)
+			log.Printf("Bedingungen erfuellt, aber Heizungs-Betriebsmodus ist nicht automatic; Betriebsmodus ist %s", heatingMode.Text)
 		} else if timingState.ConditionsMetSince.IsZero() {
 			// Die Einschalt-Hysterese startet, sobald alle Freigabebedingungen erstmals gleichzeitig gelten.
 			timingState.ConditionsMetSince = localNow
@@ -214,6 +230,10 @@ func operationModeAllowsHeatingOffset(operationMode myuplink.OperationMode) bool
 	return operationMode.Value == myuplink.OperationModeOptions.HeatingOperation ||
 		operationMode.Value == myuplink.OperationModeOptions.DomesticHotWater ||
 		operationMode.Value == myuplink.OperationModeOptions.ForcedDefrosting
+}
+
+func heatingModeAllowsOffset(mode myuplink.HeatingMode) bool {
+	return mode.Value == myuplink.HeatingModeOptions.Automatic
 }
 
 func offsetsEqual(left, right float64) bool {

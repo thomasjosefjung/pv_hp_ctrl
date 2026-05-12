@@ -20,6 +20,7 @@ const (
 	domesticWaterTempParamID = "6"
 	operationModeParamID     = "17"
 	heatingOffsetParamID     = "5001"
+	heatingModeParamID       = "5003"
 	tokenRefreshLeeway       = 30 * time.Second
 )
 
@@ -70,6 +71,35 @@ var OperationModeOptions = struct {
 type OperationMode struct {
 	Value OperationModeValue `json:"value"`
 	Text  string             `json:"text"`
+}
+
+type HeatingModeValue float64
+
+const (
+	HeatingModeAutomatic      HeatingModeValue = 0
+	HeatingModeAdditionalHeat HeatingModeValue = 1
+	HeatingModeParty          HeatingModeValue = 2
+	HeatingModeHoliday        HeatingModeValue = 3
+	HeatingModeOff            HeatingModeValue = 4
+)
+
+var HeatingModeOptions = struct {
+	Automatic      HeatingModeValue
+	AdditionalHeat HeatingModeValue
+	Party          HeatingModeValue
+	Holiday        HeatingModeValue
+	Off            HeatingModeValue
+}{
+	Automatic:      HeatingModeAutomatic,
+	AdditionalHeat: HeatingModeAdditionalHeat,
+	Party:          HeatingModeParty,
+	Holiday:        HeatingModeHoliday,
+	Off:            HeatingModeOff,
+}
+
+type HeatingMode struct {
+	Value HeatingModeValue `json:"value"`
+	Text  string           `json:"text"`
 }
 
 type Client struct {
@@ -264,6 +294,20 @@ func (c *Client) GetHeatingTemperatureOffset(deviceID string) (float64, error) {
 	return c.getDeviceParameter(deviceID, heatingOffsetParamID, "failed to get heating temperature offset")
 }
 
+func (c *Client) GetHeatingMode(deviceID string) (HeatingMode, error) {
+	value, err := c.getDeviceParameter(deviceID, heatingModeParamID, "failed to get heating operation mode")
+	if err != nil {
+		return HeatingMode{}, err
+	}
+
+	modeValue := HeatingModeValue(value)
+
+	return HeatingMode{
+		Value: modeValue,
+		Text:  heatingModeText(modeValue),
+	}, nil
+}
+
 func (c *Client) setDeviceParameter(deviceID, parameterID, value, errorPrefix string) error {
 	requestURL := fmt.Sprintf("%s/devices/%s/points", apiBaseURL, deviceID)
 	body := []byte(fmt.Sprintf(`{"%s": %q}`, parameterID, value))
@@ -323,6 +367,23 @@ func operationModeText(value OperationModeValue) string {
 		return "heat.ext.energ.source"
 	case OperationModeCoolingMode:
 		return "cooling mode"
+	default:
+		return "unknown"
+	}
+}
+
+func heatingModeText(value HeatingModeValue) string {
+	switch value {
+	case HeatingModeAutomatic:
+		return "automatic"
+	case HeatingModeAdditionalHeat:
+		return "add. heat gen."
+	case HeatingModeParty:
+		return "party"
+	case HeatingModeHoliday:
+		return "holiday"
+	case HeatingModeOff:
+		return "Off"
 	default:
 		return "unknown"
 	}
